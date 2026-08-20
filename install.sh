@@ -113,10 +113,10 @@ printf 'Downloading Mouse Me %s\n' "$VERSION"
 curl -fsSL -A "$USER_AGENT" -o "${tmp}/${asset}" "${base}/${asset}"
 curl -fsSL -A "$USER_AGENT" -o "${tmp}/${asset}.sha256" "${base}/${asset}.sha256"
 
-(
-    cd "$tmp"
-    sha256sum -c "${asset}.sha256" >/dev/null
-)
+expected="$(awk 'NF { print $1; exit }' "${tmp}/${asset}.sha256")"
+[[ "$expected" =~ ^[0-9a-fA-F]{64}$ ]] || die "Checksum file is invalid"
+actual="$(sha256sum "${tmp}/${asset}" | awk '{ print $1 }')"
+[[ "$expected" == "$actual" ]] || die "Checksum mismatch for ${asset}"
 
 tar -xzf "${tmp}/${asset}" -C "$tmp"
 [[ -f "${tmp}/mouse-me" ]] || die "Archive did not contain mouse-me"

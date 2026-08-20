@@ -88,12 +88,12 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           mkdir -p dist
-          tar -C target/release \
-            -czf "dist/mouse-me-${RELEASE_TAG}-linux-x86_64.tar.gz" \
-            mouse-me
-          sha256sum \
-            "dist/mouse-me-${RELEASE_TAG}-linux-x86_64.tar.gz" \
-            > "dist/mouse-me-${RELEASE_TAG}-linux-x86_64.tar.gz.sha256"
+          archive="mouse-me-${RELEASE_TAG}-linux-x86_64.tar.gz"
+          tar -C target/release -czf "dist/${archive}" mouse-me
+          (
+            cd dist
+            sha256sum "${archive}" > "${archive}.sha256"
+          )
 
       - name: Publish GitHub Release
         env:
