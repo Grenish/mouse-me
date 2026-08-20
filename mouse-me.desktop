@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Mouse Me
+GenericName=Cursor Manager
+Comment=Universal cursor theme manager for Omarchy and Linux
+Exec=mouse-me gui
+Icon=preferences-desktop-theme
+Terminal=false
+Type=Application
+Categories=Settings;DesktopSettings;Utility;
+Keywords=cursor;mouse;theme;hyprland;omarchy;xcursor;hyprcursor;
+StartupNotify=true
