@@ -24,7 +24,10 @@ fn scan_sorts_by_display_name() {
     common::make_theme_dir(root.path(), "alpha", "Alpha");
 
     let themes = scan_cursor_themes_from(&[root.path().to_path_buf()]);
-    let displays: Vec<_> = themes.iter().map(|theme| theme.display_name.as_str()).collect();
+    let displays: Vec<_> = themes
+        .iter()
+        .map(|theme| theme.display_name.as_str())
+        .collect();
     assert_eq!(displays, ["Alpha", "Zulu"]);
 }
 
@@ -35,10 +38,8 @@ fn scan_prefers_first_directory_when_names_collide() {
     common::make_theme_dir(first.path(), "shared", "From First");
     common::make_theme_dir(second.path(), "shared", "From Second");
 
-    let themes = scan_cursor_themes_from(&[
-        first.path().to_path_buf(),
-        second.path().to_path_buf(),
-    ]);
+    let themes =
+        scan_cursor_themes_from(&[first.path().to_path_buf(), second.path().to_path_buf()]);
     assert_eq!(themes.len(), 1);
     assert_eq!(themes[0].display_name, "From First");
 }

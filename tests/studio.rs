@@ -78,16 +78,8 @@ fn export_theme_into_writes_xcursor_files_and_index() {
         common::solid_cursor(32, 32, [255, 0, 0, 255]),
     );
 
-    let name = export_theme_into(
-        "Test Studio",
-        "From tests",
-        24,
-        1,
-        1,
-        &images,
-        dir.path(),
-    )
-    .unwrap();
+    let name =
+        export_theme_into("Test Studio", "From tests", 24, 1, 1, &images, dir.path()).unwrap();
 
     assert_eq!(name, "Test-Studio");
     let theme = dir.path().join(&name);

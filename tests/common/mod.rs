@@ -41,8 +41,8 @@ pub fn make_theme_dir(root: &Path, name: &str, display: &str) -> PathBuf {
 pub fn write_zip(path: &Path, entries: &[(&str, &[u8])]) {
     let file = fs::File::create(path).unwrap();
     let mut zip = zip::ZipWriter::new(file);
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Stored);
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     for (name, bytes) in entries {
         if name.ends_with('/') {
             zip.add_directory(*name, options).unwrap();
