@@ -514,6 +514,18 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    {
+        let wh = window_handle.clone();
+        main_window.on_open_contribute(move || {
+            let Some(w) = wh.upgrade() else { return };
+            if open_url("https://github.com/grenish/mouse-me") {
+                set_status(&w, false, "Opened GitHub".into());
+            } else {
+                set_status(&w, true, "Couldn't open github.com/grenish/mouse-me".into());
+            }
+        });
+    }
+
     main_window.run()?;
     Ok(())
 }
