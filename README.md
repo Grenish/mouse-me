@@ -1,100 +1,51 @@
-# 🐭 Mouse Me
+<div align="center">
+<img src="assets/mouse-me.png" alt="Mouse Me" width="104">
 
-**Mouse Me** is a lightweight, blazingly fast cursor manager built in **Rust** with a modern **Slint GUI** and an instant **CLI**. Designed specifically for **Omarchy** and modern Linux desktops (Hyprland, Wayland, X11), it enables users to easily add custom cursor packs and applies them 100% consistently across all subsystems.
+<h1>Mouse Me</h1>
+</div>
 
----
+A cursor manager for Linux desktops (Hyprland, Omarchy, GTK, Qt, and X11). It includes a Slint GUI and a CLI in one binary.
 
-## ✨ Features
+![Mouse Me](assets/screens/main.png)
 
-- 🚀 **Dual Interface in a Single Binary**:
-  - **Modern Slint GUI**: Interactive visual browser, live cursor previews (default, pointer, wait, text), size switcher, one-click apply, and file picker importer.
-  - **Blazingly Fast CLI (<20ms)**: Scriptable, pipeable, and perfect for dotfile automation and terminal keybindings.
-- 🎯 **100% Universal System-Wide Application**:
-  - **Wayland / Hyprland**: Active live session cursor switching via `hyprctl setcursor`.
-  - **GTK 3 & GTK 4**: Live GSettings sync and `settings.ini` generation.
-  - **GTK 2**: `~/.gtkrc-2.0` updates.
-  - **Qt 5 / Qt 6 & KDE**: `~/.config/kdeglobals` and `~/.config/environment.d/10-cursor.conf`.
-  - **XWayland & X11**: `~/.Xresources` + `xrdb -merge` synchronization.
-  - **Default Fallback**: `~/.icons/default/index.theme` and `~/.local/share/icons/default/index.theme`.
-  - **Flatpak Apps**: Configures user overrides to allow sandboxed applications to access custom cursor themes.
-- 📦 **Smart Importer & Normalization**:
-  - Directly import `.zip`, `.tar.gz`, `.tar.xz`, `.tar.bz2`, `.tar` archives, or folder directories.
-  - Automatically un-nests messy archive hierarchies.
-  - Auto-generates missing `index.theme` so GTK/X11 recognizes themes immediately.
-  - Supports both **XCursor** and **Hyprcursor** themes.
-- 🎨 **Built-in Pure-Rust XCursor Parser**:
-  - Extracts live preview sprites directly from binary cursor files without external C libraries.
+## Build
 
----
-
-## 📦 Installation & Build
-
-### Requirements
-- Rust 1.80+ and Cargo
-- Standard Wayland / X11 dev libraries (pre-installed on Omarchy/Arch)
-- Optional runtime tools for live integration: `hyprctl`, `gsettings`, `xrdb`, `flatpak`, `xdg-open`, and `curl`
-
-### Build Release Binary
 ```bash
-git clone https://github.com/grenishrai/mouse-me.git
+git clone https://github.com/Grenish/mouse-me.git
 cd mouse-me
 cargo build --release
 ```
 
-The compiled binary will be in `target/release/mouse-me`.
+The binary is `target/release/mouse-me`.
 
-### Install to System
 ```bash
 sudo install -Dm755 target/release/mouse-me /usr/local/bin/mouse-me
 install -Dm644 mouse-me.desktop ~/.local/share/applications/mouse-me.desktop
 ```
 
----
+## Usage
 
-## 🖥️ Usage
+GUI:
 
-### 1. Launching the GUI
-Launch via your desktop launcher (**Walker**, **Rofi**, **App Grid**) or from the terminal:
 ```bash
 mouse-me
-# or
 mouse-me gui
 ```
 
-### 2. Command-Line Interface (CLI)
+CLI:
 
-#### List installed cursor themes:
 ```bash
 mouse-me list
-```
-*(Use `--json` for machine-readable output)*
-
-#### Set a cursor theme and size system-wide:
-```bash
-# Sets cursor with default 24px size
-mouse-me set Twilight-cursors
-
-# Sets cursor with custom size (e.g. 32px)
-mouse-me set Twilight-cursors 32
-```
-
-#### Get active cursor theme & size:
-```bash
+mouse-me list --json
 mouse-me get
-```
-
-#### Import a custom cursor pack archive:
-```bash
-mouse-me add ~/Downloads/MyCustomCursor.tar.gz
-```
-
-#### Remove a user-installed cursor theme:
-```bash
+mouse-me set modest-light
+mouse-me set modest-light 32
+mouse-me add ~/Downloads/cursors.zip
 mouse-me remove MyCustomCursor
 ```
 
----
+`set` applies the theme and size across Hyprland, GTK, Qt, X11, and the user environment.
 
-## 📄 License
+## License
 
-This project is licensed under the **GNU General Public License v3.0 (GPL-3.0-or-later)**. See the [LICENSE](LICENSE) file for details.
+GPL-3.0-or-later. See [LICENSE](LICENSE).
