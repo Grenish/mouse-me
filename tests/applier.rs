@@ -1,4 +1,4 @@
-use mouse_me::core::applier::{validate_apply_input, ApplyTargets};
+use mouse_me::core::applier::{apply_with_targets, validate_apply_input, ApplyTargets};
 
 #[test]
 fn apply_targets_all_enables_every_desktop() {
@@ -35,4 +35,20 @@ fn validate_apply_input_rejects_zero_size() {
 fn validate_apply_input_accepts_normal_theme() {
     assert!(validate_apply_input("modest-light", 24).is_ok());
     assert!(validate_apply_input("Yaru", 64).is_ok());
+}
+
+#[test]
+fn apply_with_no_targets_returns_ok_without_touching_the_session() {
+    let targets = ApplyTargets {
+        hyprland: false,
+        gsettings: false,
+        gtk: false,
+        qt: false,
+        environment: false,
+        xresources: false,
+        default_index: false,
+        flatpak: false,
+    };
+    let warnings = apply_with_targets("modest-light", 24, &targets).unwrap();
+    assert!(warnings.is_empty());
 }

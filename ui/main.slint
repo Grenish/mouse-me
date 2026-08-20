@@ -5,6 +5,7 @@ import {
     Display,
     NavBtn,
     Chip,
+    Tag,
     SizePill,
     Toggle,
     ToggleRow,
@@ -54,7 +55,9 @@ export component MainWindow inherits Window {
     in-out property <string> library_filter: "all";
     in-out property <string> library_type: "all";
     in-out property <int> theme_count: 0;
-    in-out property <string> status_message: "Ready";
+    in-out property <length> library_viewport_y: 0px;
+    in-out property <length> library_visible_height: 0px;
+    in-out property <string> status_message: "";
     in-out property <bool> status_is_error: false;
     in-out property <bool> is_loading: false;
     in-out property <bool> checking_update: false;
@@ -443,6 +446,10 @@ export component MainWindow inherits Window {
 
                     if root.theme_count > 0: ScrollView {
                         vertical-stretch: 1;
+                        viewport-y <=> root.library_viewport_y;
+                        changed visible-height => {
+                            root.library_visible_height = self.visible-height;
+                        }
                         VerticalLayout {
                             spacing: 10px;
                             padding-right: 8px;
@@ -520,65 +527,24 @@ export component MainWindow inherits Window {
                                                 color: Ink.ivory;
                                                 vertical-alignment: center;
                                                 height: 100%;
+                                                horizontal-stretch: 1;
+                                                overflow: elide;
                                             }
 
-                                            Rectangle {
-                                                height: 20px;
-                                                border-radius: 6px;
-                                                background: item.cursor_type == "Hyprcursor" ? #1E4F3455 : Ink.ghost;
-                                                HorizontalLayout {
-                                                    width: 100%;
-                                                    height: 100%;
-                                                    padding-left: 7px;
-                                                    padding-right: 7px;
-                                                    alignment: center;
-                                                    Text {
-                                                        text: item.cursor_type;
-                                                        font-size: 10px;
-                                                        font-weight: 700;
-                                                        color: item.cursor_type == "Hyprcursor" ? Ink.sage : Ink.fog;
-                                                        vertical-alignment: center;
-                                                    }
-                                                }
+                                            Tag {
+                                                label: item.cursor_type;
+                                                fill: item.cursor_type == "Hyprcursor" ? #1E4F3455 : Ink.ghost;
+                                                ink: item.cursor_type == "Hyprcursor" ? Ink.sage : Ink.fog;
                                             }
 
-                                            if item.is_user: Rectangle {
-                                                height: 20px;
-                                                border-radius: 6px;
-                                                background: Ink.ghost;
-                                                HorizontalLayout {
-                                                    width: 100%;
-                                                    height: 100%;
-                                                    padding-left: 7px;
-                                                    padding-right: 7px;
-                                                    alignment: center;
-                                                    Text {
-                                                        text: "User";
-                                                        font-size: 10px;
-                                                        font-weight: 600;
-                                                        color: Ink.fog;
-                                                        vertical-alignment: center;
-                                                    }
-                                                }
+                                            if item.is_user: Tag {
+                                                label: "User";
                                             }
-                                            if item.is_active: Rectangle {
-                                                height: 20px;
-                                                border-radius: 6px;
-                                                background: #C9845A33;
-                                                HorizontalLayout {
-                                                    width: 100%;
-                                                    height: 100%;
-                                                    padding-left: 7px;
-                                                    padding-right: 7px;
-                                                    alignment: center;
-                                                    Text {
-                                                        text: "Live";
-                                                        font-size: 10px;
-                                                        font-weight: 700;
-                                                        color: Ink.click;
-                                                        vertical-alignment: center;
-                                                    }
-                                                }
+
+                                            if item.is_active: Tag {
+                                                label: "Live";
+                                                fill: #C9845A33;
+                                                ink: Ink.click;
                                             }
                                         }
 
@@ -805,6 +771,14 @@ export component MainWindow inherits Window {
                                     background: Ink.parchment;
                                     clip: true;
 
+                                    property <length> image-width: max(1, root.studio_img_w) * 1px;
+                                    property <length> image-height: max(1, root.studio_img_h) * 1px;
+                                    property <float> image-scale: min(self.width / image-width, self.height / image-height);
+                                    property <length> displayed-width: image-width * image-scale;
+                                    property <length> displayed-height: image-height * image-scale;
+                                    property <length> image-left: (self.width - displayed-width) / 2;
+                                    property <length> image-top: (self.height - displayed-height) / 2;
+
                                     if root.studio_has_preview: Image {
                                         source: root.studio_preview;
                                         width: 100%;
@@ -831,8 +805,8 @@ export component MainWindow inherits Window {
                                     }
 
                                     if root.studio_has_preview: Rectangle {
-                                        x: parent.width * root.studio_hotspot_x / max(1, root.studio_img_w) - 8px;
-                                        y: parent.height * root.studio_hotspot_y / max(1, root.studio_img_h) - 8px;
+                                        x: image-left + root.studio_hotspot_x * image-scale * 1px - 8px;
+                                        y: image-top + root.studio_hotspot_y * image-scale * 1px - 8px;
                                         width: 16px;
                                         height: 16px;
                                         border-radius: 8px;
@@ -845,8 +819,8 @@ export component MainWindow inherits Window {
                                         clicked => {
                                             if root.studio_has_preview {
                                                 root.studio_set_hotspot(
-                                                    self.mouse-x / self.width,
-                                                    self.mouse-y / self.height);
+                                                    max(0.0, min(1.0, (self.mouse-x - image-left) / max(1px, displayed-width))),
+                                                    max(0.0, min(1.0, (self.mouse-y - image-top) / max(1px, displayed-height))));
                                             } else {
                                                 root.studio_pick_image();
                                             }
@@ -1130,7 +1104,7 @@ export component MainWindow inherits Window {
                             }
 
                             Text {
-                                text: "Accounts are not wired up yet. This page is reserved for signing in and syncing your packs.";
+                                text: "After signing in, your cursor packs will be synced across your devices.";
                                 font-size: 13px;
                                 color: Ink.mist;
                                 horizontal-alignment: center;
@@ -1140,7 +1114,7 @@ export component MainWindow inherits Window {
                             HorizontalLayout {
                                 alignment: center;
                                 FillBtn {
-                                    label: "Coming later";
+                                    label: "In Progress";
                                     quiet: true;
                                 }
                             }

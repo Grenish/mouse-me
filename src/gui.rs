@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 
-use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
+use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
 use mouse_me::core::applier::{apply_hypr_cursor_prefs, apply_with_targets};
 use mouse_me::core::importer::{import_cursor_pack, is_safe_theme_name};
@@ -15,9 +15,11 @@ use mouse_me::core::types::CursorImage;
 
 slint::include_modules!();
 
-static CURSOR_ARCHIVE_EXTENSIONS: [&str; 7] =
-    ["zip", "tar.gz", "tgz", "tar.xz", "txz", "tar.bz2", "tar"];
+static CURSOR_ARCHIVE_EXTENSIONS: [&str; 6] = ["zip", "gz", "tgz", "xz", "bz2", "tar"];
+static ALL_FILE_EXTENSIONS: [&str; 1] = ["*"];
 static IMAGE_EXTENSIONS: [&str; 3] = ["png", "jpg", "jpeg"];
+const LIBRARY_CARD_HEIGHT: f32 = 92.0;
+const LIBRARY_CARD_GAP: f32 = 10.0;
 
 pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     let main_window = MainWindow::new()?;
@@ -36,17 +38,12 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         let wh = window_handle.clone();
         main_window.on_apply_theme(move |theme_name, size| {
             let name_str = theme_name.as_str().to_string();
-            let size_u32 = size as u32;
+            let size_u32 = size.clamp(1, 512) as u32;
             let Some(w) = wh.upgrade() else { return };
             let settings = read_settings(&w);
             match apply_with_targets(&name_str, size_u32, &settings.apply_targets()) {
-                Ok(()) => {
-                    w.set_active_theme_name(SharedString::from(&name_str));
-                    w.set_active_size(size);
-                    set_status(&w, false, format!("Applied {} at {}px", name_str, size));
-                    refresh_ui_state(&w);
-                }
-                Err(e) => set_status(&w, true, format!("{}", e)),
+                Ok(warnings) => mark_theme_applied(&w, &name_str, size_u32, &warnings),
+                Err(e) => set_status(&w, true, e),
             }
         });
     }
@@ -58,6 +55,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
             let file = rfd::FileDialog::new()
                 .set_title("Select cursor archive")
                 .add_filter("Cursor archives", CURSOR_ARCHIVE_EXTENSIONS.as_slice())
+                .add_filter("All files", ALL_FILE_EXTENSIONS.as_slice())
                 .pick_file();
             if let Some(path) = file {
                 handle_import(&w, &path);
@@ -148,11 +146,19 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
             let mut found = false;
             let mut errors = Vec::new();
             for path in paths {
-                if std::fs::symlink_metadata(&path).is_ok() {
-                    found = true;
-                    if let Err(error) = std::fs::remove_dir_all(&path) {
-                        errors.push(format!("{}: {}", path.display(), error));
-                    }
+                let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+                    continue;
+                };
+                let is_theme = metadata.is_dir()
+                    && (path.join("cursors").is_dir()
+                        || path.join("hyprcursors").is_dir()
+                        || path.join("manifest.hl").is_file());
+                if !is_theme {
+                    continue;
+                }
+                found = true;
+                if let Err(error) = std::fs::remove_dir_all(&path) {
+                    errors.push(format!("{}: {}", path.display(), error));
                 }
             }
             if !errors.is_empty() {
@@ -223,7 +229,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 let active = w.get_active_theme_name().as_str().to_string();
                 if !active.is_empty() && active != "default" {
                     match apply_with_targets(&active, size as u32, &settings.apply_targets()) {
-                        Ok(()) => set_status(&w, false, format!("Size set to {}px", size)),
+                        Ok(_) => set_status(&w, false, format!("Size set to {}px", size)),
                         Err(e) => set_status(&w, true, e),
                     }
                 } else {
@@ -401,7 +407,9 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                             settings.preferred_size,
                             &settings.apply_targets(),
                         ) {
-                            Ok(()) => refresh_ui_state(&w),
+                            Ok(warnings) => {
+                                mark_theme_applied(&w, &folder, settings.preferred_size, &warnings)
+                            }
                             Err(error) => set_status(&w, true, error),
                         }
                     }
@@ -581,31 +589,61 @@ fn read_settings(window: &MainWindow) -> AppSettings {
 }
 
 fn handle_import(window: &MainWindow, path: &Path) {
-    match import_cursor_pack(path) {
-        Ok(imported) => {
-            let joined = imported.join(", ");
-            set_status(window, false, format!("Installed {}", joined));
-            window.set_import_note(SharedString::from(format!("Installed {}.", joined)));
-            refresh_ui_state(window);
-            let settings = read_settings(window);
-            if settings.auto_apply_on_import {
-                if let Some(name) = imported.first() {
-                    match apply_with_targets(
-                        name,
-                        settings.preferred_size,
-                        &settings.apply_targets(),
-                    ) {
-                        Ok(()) => refresh_ui_state(window),
-                        Err(error) => set_status(window, true, error),
+    if window.get_is_loading() {
+        set_status(window, true, "An import is already in progress.".into());
+        return;
+    }
+
+    window.set_is_loading(true);
+    let path = path.to_path_buf();
+    let settings = read_settings(window);
+    let weak_window = window.as_weak();
+
+    std::thread::spawn(move || {
+        let result = match import_cursor_pack(&path) {
+            Err(error) => Err(error),
+            Ok(imported) => {
+                let apply_result = if settings.auto_apply_on_import {
+                    imported.first().map(|name| {
+                        apply_with_targets(name, settings.preferred_size, &settings.apply_targets())
+                    })
+                } else {
+                    None
+                };
+                Ok((imported, apply_result))
+            }
+        };
+
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = weak_window.upgrade() else {
+                return;
+            };
+            window.set_is_loading(false);
+            match result {
+                Err(error) => {
+                    window.set_import_note(SharedString::from(error.clone()));
+                    set_status(&window, true, error);
+                }
+                Ok((imported, apply_result)) => {
+                    let joined = imported.join(", ");
+                    window.set_import_note(SharedString::from(format!("Installed {}.", joined)));
+                    refresh_ui_state(&window);
+                    match (imported.first(), apply_result) {
+                        (Some(name), Some(Ok(warnings))) => {
+                            mark_theme_applied(
+                                &window,
+                                name,
+                                read_settings(&window).preferred_size,
+                                &warnings,
+                            );
+                        }
+                        (_, Some(Err(error))) => set_status(&window, true, error),
+                        _ => set_status(&window, false, format!("Installed {}", joined)),
                     }
                 }
             }
-        }
-        Err(err) => {
-            window.set_import_note(SharedString::from(err.clone()));
-            set_status(window, true, err);
-        }
-    }
+        });
+    });
 }
 
 fn assign_studio_image(
@@ -646,6 +684,12 @@ fn show_selected_preview(window: &MainWindow, images: &HashMap<String, CursorIma
     if let Some(img) = images.get(role) {
         window.set_studio_img_w(img.width as i32);
         window.set_studio_img_h(img.height as i32);
+        if window.get_studio_hotspot_x() < 0 || window.get_studio_hotspot_x() >= img.width as i32 {
+            window.set_studio_hotspot_x(0);
+        }
+        if window.get_studio_hotspot_y() < 0 || window.get_studio_hotspot_y() >= img.height as i32 {
+            window.set_studio_hotspot_y(0);
+        }
         let (preview, has) = to_slint_image(Some(img));
         window.set_studio_preview(preview);
         window.set_studio_has_preview(has);
@@ -667,9 +711,83 @@ fn refresh_studio_roles(window: &MainWindow, images: &HashMap<String, CursorImag
     window.set_studio_roles(ModelRc::from(Rc::new(VecModel::from(items))));
 }
 
+fn mark_theme_applied(window: &MainWindow, name: &str, size: u32, warnings: &[String]) {
+    window.set_active_theme_name(SharedString::from(name));
+    if warnings.is_empty() {
+        set_status(window, false, format!("Applied {} at {}px", name, size));
+    } else {
+        set_status(
+            window,
+            false,
+            format!(
+                "Applied {} at {}px with warnings: {}",
+                name,
+                size,
+                warnings.join("; ")
+            ),
+        );
+    }
+    window.set_active_size(size as i32);
+
+    let themes = window.get_themes();
+    let Some(model) = themes.as_any().downcast_ref::<VecModel<ThemeItem>>() else {
+        refresh_library(window, Some(name));
+        return;
+    };
+
+    let mut applied_index = None;
+    for i in 0..model.row_count() {
+        let Some(mut item) = model.row_data(i) else {
+            continue;
+        };
+        let is_active = item.name.eq_ignore_ascii_case(name);
+        if is_active {
+            applied_index = Some(i);
+        }
+        if item.is_active != is_active {
+            item.is_active = is_active;
+            item.is_deletable = item.is_user && !is_active;
+            model.set_row_data(i, item);
+        }
+    }
+
+    if let Some(index) = applied_index {
+        reveal_library_item(window, index);
+    }
+}
+
+fn reveal_library_item(window: &MainWindow, index: usize) {
+    let item_top = index as f32 * (LIBRARY_CARD_HEIGHT + LIBRARY_CARD_GAP);
+    let item_bottom = item_top + LIBRARY_CARD_HEIGHT;
+    let view_h = window.get_library_visible_height();
+    let current = window.get_library_viewport_y();
+    if view_h <= 0.0 {
+        return;
+    }
+
+    let mut next = current;
+    if item_top < current {
+        next = item_top;
+    } else if item_bottom > current + view_h {
+        next = (item_bottom - view_h).max(0.0);
+    }
+
+    if (next - current).abs() > 0.5 {
+        window.set_library_viewport_y(next);
+    }
+}
+
 fn refresh_ui_state(window: &MainWindow) {
+    refresh_library(window, None);
+}
+
+fn refresh_library(window: &MainWindow, applied_theme: Option<&str>) {
     let active_state = get_active_cursor();
-    window.set_active_theme_name(SharedString::from(&active_state.theme_name));
+    let active_name = applied_theme
+        .filter(|name| !name.is_empty())
+        .map(|name| name.to_string())
+        .unwrap_or(active_state.theme_name);
+    window.set_active_theme_name(SharedString::from(&active_name));
     if window.get_active_size() <= 0 {
         window.set_active_size(active_state.size as i32);
     }
@@ -715,7 +833,7 @@ fn refresh_ui_state(window: &MainWindow) {
             }
         }
 
-        let is_active = theme.name.eq_ignore_ascii_case(&active_state.theme_name);
+        let is_active = theme.name.eq_ignore_ascii_case(&active_name);
         let (def_img, has_preview) = to_slint_image(theme.preview_default.as_ref());
         let (ptr_img, _) = to_slint_image(theme.preview_pointer.as_ref());
         let (wait_img, _) = to_slint_image(theme.preview_wait.as_ref());
@@ -739,8 +857,16 @@ fn refresh_ui_state(window: &MainWindow) {
         });
     }
 
+    let applied_index = applied_theme.and_then(|name| {
+        ui_items
+            .iter()
+            .position(|item| item.name.eq_ignore_ascii_case(name))
+    });
     window.set_theme_count(ui_items.len() as i32);
     window.set_themes(ModelRc::from(Rc::new(VecModel::from(ui_items))));
+    if let Some(index) = applied_index {
+        reveal_library_item(window, index);
+    }
 }
 
 fn to_slint_image(cursor_img: Option<&CursorImage>) -> (Image, bool) {
@@ -836,7 +962,7 @@ fn paths_from_transfer(data: &slint::DataTransfer) -> Vec<PathBuf> {
                 continue;
             }
             let path = PathBuf::from(&decoded);
-            if path.exists() {
+            if (path.is_file() || path.is_dir()) && !paths.contains(&path) {
                 paths.push(path);
             }
         }
@@ -846,7 +972,17 @@ fn paths_from_transfer(data: &slint::DataTransfer) -> Vec<PathBuf> {
 
 fn decode_uri(raw: &str) -> String {
     let s = raw.trim().trim_matches('"').trim_matches('\'');
-    let s = s.strip_prefix("file://").unwrap_or(s);
+    let s = if let Some(path) = s.strip_prefix("file://") {
+        if path.starts_with('/') {
+            path
+        } else if let Some(path) = path.strip_prefix("localhost/") {
+            return decode_percent_bytes(&format!("/{}", path));
+        } else {
+            return String::new();
+        }
+    } else {
+        s
+    };
     let bytes = s.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
@@ -855,6 +991,26 @@ fn decode_uri(raw: &str) -> String {
             if let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
                 if let Ok(v) = u8::from_str_radix(hex, 16) {
                     out.push(v);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn decode_percent_bytes(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
+                if let Ok(value) = u8::from_str_radix(hex, 16) {
+                    out.push(value);
                     i += 3;
                     continue;
                 }

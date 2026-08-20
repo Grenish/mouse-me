@@ -119,12 +119,15 @@ pub fn handle_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::Set { theme, size }) => {
             println!("Applying cursor '{}' ({}px) system-wide...", theme, size);
-            apply_system_wide(&theme, size)
+            let warnings = apply_system_wide(&theme, size)
                 .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
             println!(
                 "✓ Successfully applied '{}' ({}px) to Hyprland, GTK, Qt, and X11!",
                 theme, size
             );
+            for warning in warnings {
+                eprintln!("  warning: {warning}");
+            }
         }
         Some(Commands::Get { json }) => {
             let active = get_active_cursor();

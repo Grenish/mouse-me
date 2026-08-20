@@ -80,7 +80,8 @@ fn quote_gtk2_value(value: &str) -> String {
 }
 
 /// Applies the given cursor theme and size universally across all Linux subsystems.
-pub fn apply_system_wide(theme_name: &str, size: u32) -> Result<(), String> {
+/// Returns skipped-target warnings on success.
+pub fn apply_system_wide(theme_name: &str, size: u32) -> Result<Vec<String>, String> {
     apply_with_targets(theme_name, size, &ApplyTargets::all())
 }
 
@@ -88,62 +89,80 @@ pub fn apply_with_targets(
     theme_name: &str,
     size: u32,
     targets: &ApplyTargets,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     validate_apply_input(theme_name, size)?;
-    let mut errors = Vec::new();
+    let mut warnings = Vec::new();
+    let mut attempted = 0usize;
+    let mut failed = 0usize;
 
     if targets.hyprland {
+        attempted += 1;
         if let Err(e) = apply_hyprctl(theme_name, size) {
-            errors.push(format!("Hyprctl: {}", e));
+            failed += 1;
+            warnings.push(format!("Hyprctl: {}", e));
         }
     }
 
     if targets.gsettings {
+        attempted += 1;
         if let Err(e) = apply_gsettings(theme_name, size) {
-            errors.push(format!("GSettings: {}", e));
+            failed += 1;
+            warnings.push(format!("GSettings: {}", e));
         }
     }
 
     if targets.gtk {
+        attempted += 1;
         if let Err(e) = apply_gtk_configs(theme_name, size) {
-            errors.push(format!("GTK configs: {}", e));
+            failed += 1;
+            warnings.push(format!("GTK configs: {}", e));
         }
     }
 
     if targets.qt {
+        attempted += 1;
         if let Err(e) = apply_qt_config(theme_name, size) {
-            errors.push(format!("Qt config: {}", e));
+            failed += 1;
+            warnings.push(format!("Qt config: {}", e));
         }
     }
 
     if targets.environment {
+        attempted += 1;
         if let Err(e) = apply_environment_d(theme_name, size) {
-            errors.push(format!("Environment.d: {}", e));
+            failed += 1;
+            warnings.push(format!("Environment.d: {}", e));
         }
     }
 
     if targets.xresources {
+        attempted += 1;
         if let Err(e) = apply_xresources(theme_name, size) {
-            errors.push(format!("Xresources: {}", e));
+            failed += 1;
+            warnings.push(format!("Xresources: {}", e));
         }
     }
 
     if targets.default_index {
+        attempted += 1;
         if let Err(e) = apply_default_index_theme(theme_name) {
-            errors.push(format!("Default index.theme: {}", e));
+            failed += 1;
+            warnings.push(format!("Default index.theme: {}", e));
         }
     }
 
     if targets.flatpak {
+        attempted += 1;
         if let Err(e) = apply_flatpak_overrides() {
-            errors.push(format!("Flatpak: {}", e));
+            failed += 1;
+            warnings.push(format!("Flatpak: {}", e));
         }
     }
 
-    if errors.is_empty() {
-        Ok(())
+    if attempted > 0 && failed == attempted {
+        Err(format!("Could not apply: {}", warnings.join(", ")))
     } else {
-        Err(format!("Applied with some warnings: {}", errors.join(", ")))
+        Ok(warnings)
     }
 }
 

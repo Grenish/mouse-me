@@ -1,8 +1,12 @@
 use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{self, BufReader};
+use std::io::{self, BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use walkdir::WalkDir;
+
+const MAX_ARCHIVE_INPUT_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_EXTRACTED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const MAX_EXTRACTED_ENTRIES: usize = 100_000;
 
 /// Imports a cursor theme archive or directory into ~/.local/share/icons.
 /// Returns a list of imported theme names.
@@ -24,6 +28,15 @@ pub fn import_cursor_pack_into(
         ));
     }
 
+    let source_metadata = fs::metadata(source_path)
+        .map_err(|e| format!("Could not inspect '{}': {}", source_path.display(), e))?;
+    if source_metadata.is_file() && source_metadata.len() > MAX_ARCHIVE_INPUT_BYTES {
+        return Err(format!(
+            "Source archive is too large (maximum is {} MiB)",
+            MAX_ARCHIVE_INPUT_BYTES / (1024 * 1024)
+        ));
+    }
+
     let temp_dir = tempfile::tempdir().map_err(|e| format!("Failed to create temp dir: {}", e))?;
     let extract_root = temp_dir.path();
 
@@ -36,8 +49,10 @@ pub fn import_cursor_pack_into(
         unpack_archive(source_path, extract_root)?;
     }
 
+    validate_extracted_tree(extract_root)?;
+
     // Search for theme directories containing cursors/ or hyprcursors/ or manifest.hl
-    let candidate_dirs = find_theme_roots(extract_root);
+    let candidate_dirs = find_theme_roots(extract_root)?;
     if candidate_dirs.is_empty() {
         return Err(
             "No valid cursor theme found in the archive (missing 'cursors/' or 'hyprcursors/')."
@@ -54,7 +69,10 @@ pub fn import_cursor_pack_into(
     for theme_dir in candidate_dirs {
         let theme_name = determine_theme_name(&theme_dir);
         if !seen_names.insert(theme_name.clone()) {
-            continue;
+            return Err(format!(
+                "Multiple imported themes resolve to the same directory name '{}'",
+                theme_name
+            ));
         }
 
         let dest = target_icons_dir.join(&theme_name);
@@ -68,12 +86,7 @@ pub fn import_cursor_pack_into(
         // Ensure index.theme exists before replacing a previously installed theme.
         ensure_index_theme(&staged_theme, &theme_name)?;
 
-        if dest.exists() || fs::symlink_metadata(&dest).is_ok() {
-            remove_existing_path(&dest)
-                .map_err(|e| format!("Failed to replace '{}': {}", dest.display(), e))?;
-        }
-        fs::rename(&staged_theme, &dest)
-            .map_err(|e| format!("Failed to install '{}': {}", dest.display(), e))?;
+        replace_staged_theme(&staged_theme, &dest, target_icons_dir)?;
 
         imported_names.push(theme_name);
     }
@@ -81,8 +94,16 @@ pub fn import_cursor_pack_into(
     Ok(imported_names)
 }
 
-/// Unpacks various archive formats into destination
-fn unpack_archive(archive_path: &Path, dest: &Path) -> Result<(), String> {
+#[derive(Clone, Copy)]
+enum ArchiveKind {
+    Zip,
+    TarGz,
+    TarXz,
+    TarBz2,
+    Tar,
+}
+
+fn detect_archive_kind(archive_path: &Path) -> Option<ArchiveKind> {
     let file_name = archive_path
         .file_name()
         .and_then(|n| n.to_str())
@@ -90,57 +111,162 @@ fn unpack_archive(archive_path: &Path, dest: &Path) -> Result<(), String> {
         .to_lowercase();
 
     if file_name.ends_with(".zip") {
-        let file = File::open(archive_path).map_err(|e| format!("Failed to open zip: {}", e))?;
-        let mut archive =
-            zip::ZipArchive::new(file).map_err(|e| format!("Invalid zip archive: {}", e))?;
-        archive
-            .extract(dest)
-            .map_err(|e| format!("Zip extract error: {}", e))?;
-        return Ok(());
+        return Some(ArchiveKind::Zip);
+    }
+    if file_name.ends_with(".tar.gz") || file_name.ends_with(".tgz") || file_name.ends_with(".gz") {
+        return Some(ArchiveKind::TarGz);
+    }
+    if file_name.ends_with(".tar.xz") || file_name.ends_with(".txz") || file_name.ends_with(".xz") {
+        return Some(ArchiveKind::TarXz);
+    }
+    if file_name.ends_with(".tar.bz2")
+        || file_name.ends_with(".tbz2")
+        || file_name.ends_with(".bz2")
+    {
+        return Some(ArchiveKind::TarBz2);
+    }
+    if file_name.ends_with(".tar") {
+        return Some(ArchiveKind::Tar);
     }
 
-    let file = File::open(archive_path).map_err(|e| format!("Failed to open archive: {}", e))?;
-    let reader = BufReader::new(file);
+    let mut magic = [0u8; 6];
+    let mut file = File::open(archive_path).ok()?;
+    let read = file.read(&mut magic).ok()?;
+    if read >= 2 && magic.starts_with(b"PK") {
+        return Some(ArchiveKind::Zip);
+    }
+    if read >= 2 && magic.get(0..2) == Some(&[0x1f, 0x8b]) {
+        return Some(ArchiveKind::TarGz);
+    }
+    if read >= 6 && magic == [0xfd, b'7', b'z', b'X', b'Z', 0x00] {
+        return Some(ArchiveKind::TarXz);
+    }
+    if read >= 3 && magic.starts_with(b"BZh") {
+        return Some(ArchiveKind::TarBz2);
+    }
+    None
+}
 
-    if file_name.ends_with(".tar.gz") || file_name.ends_with(".tgz") {
-        let gz = flate2::read::GzDecoder::new(reader);
-        let mut tar = tar::Archive::new(gz);
-        tar.unpack(dest)
-            .map_err(|e| format!("Tar.gz unpack error: {}", e))?;
-    } else if file_name.ends_with(".tar.xz") || file_name.ends_with(".txz") {
-        let xz = xz2::read::XzDecoder::new(reader);
-        let mut tar = tar::Archive::new(xz);
-        tar.unpack(dest)
-            .map_err(|e| format!("Tar.xz unpack error: {}", e))?;
-    } else if file_name.ends_with(".tar.bz2") || file_name.ends_with(".tbz2") {
-        let bz = bzip2::read::BzDecoder::new(reader);
-        let mut tar = tar::Archive::new(bz);
-        tar.unpack(dest)
-            .map_err(|e| format!("Tar.bz2 unpack error: {}", e))?;
-    } else if file_name.ends_with(".tar") {
-        let mut tar = tar::Archive::new(reader);
-        tar.unpack(dest)
-            .map_err(|e| format!("Tar unpack error: {}", e))?;
-    } else {
-        // Try fallback detection by attempting zip, then tar.gz
-        if let Ok(file_retry) = File::open(archive_path) {
-            if let Ok(mut zip_arc) = zip::ZipArchive::new(file_retry) {
-                if zip_arc.extract(dest).is_ok() {
-                    return Ok(());
-                }
+/// Unpacks various archive formats into destination
+fn unpack_archive(archive_path: &Path, dest: &Path) -> Result<(), String> {
+    let kind = detect_archive_kind(archive_path).ok_or_else(|| {
+        format!(
+            "Unsupported archive format: {}",
+            archive_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+        )
+    })?;
+
+    match kind {
+        ArchiveKind::Zip => {
+            let file =
+                File::open(archive_path).map_err(|e| format!("Failed to open zip: {}", e))?;
+            let mut archive =
+                zip::ZipArchive::new(file).map_err(|e| format!("Invalid zip archive: {}", e))?;
+            archive
+                .extract(dest)
+                .map_err(|e| format!("Zip extract error: {}", e))?;
+        }
+        ArchiveKind::TarGz => {
+            let file =
+                File::open(archive_path).map_err(|e| format!("Failed to open archive: {}", e))?;
+            let gz = flate2::read::GzDecoder::new(BufReader::new(file));
+            tar::Archive::new(gz)
+                .unpack(dest)
+                .map_err(|e| format!("Tar.gz unpack error: {}", e))?;
+        }
+        ArchiveKind::TarXz => {
+            let file =
+                File::open(archive_path).map_err(|e| format!("Failed to open archive: {}", e))?;
+            let xz = xz2::read::XzDecoder::new(BufReader::new(file));
+            tar::Archive::new(xz)
+                .unpack(dest)
+                .map_err(|e| format!("Tar.xz unpack error: {}", e))?;
+        }
+        ArchiveKind::TarBz2 => {
+            let file =
+                File::open(archive_path).map_err(|e| format!("Failed to open archive: {}", e))?;
+            let bz = bzip2::read::BzDecoder::new(BufReader::new(file));
+            tar::Archive::new(bz)
+                .unpack(dest)
+                .map_err(|e| format!("Tar.bz2 unpack error: {}", e))?;
+        }
+        ArchiveKind::Tar => {
+            let file =
+                File::open(archive_path).map_err(|e| format!("Failed to open archive: {}", e))?;
+            tar::Archive::new(BufReader::new(file))
+                .unpack(dest)
+                .map_err(|e| format!("Tar unpack error: {}", e))?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_extracted_tree(root: &Path) -> Result<(), String> {
+    let mut entries = 0usize;
+    let mut total_bytes = 0u64;
+
+    for entry in WalkDir::new(root).follow_links(false).into_iter() {
+        let entry = entry.map_err(|e| format!("Could not validate extracted archive: {}", e))?;
+        entries = entries
+            .checked_add(1)
+            .ok_or("Extracted archive entry count overflow")?;
+        if entries > MAX_EXTRACTED_ENTRIES {
+            return Err(format!(
+                "Archive contains too many entries (maximum is {})",
+                MAX_EXTRACTED_ENTRIES
+            ));
+        }
+
+        if entry.file_type().is_file() {
+            let bytes = entry
+                .metadata()
+                .map_err(|e| format!("Could not inspect extracted file: {}", e))?
+                .len();
+            total_bytes = total_bytes
+                .checked_add(bytes)
+                .ok_or("Extracted archive size overflow")?;
+            if bytes > MAX_EXTRACTED_BYTES || total_bytes > MAX_EXTRACTED_BYTES {
+                return Err(format!(
+                    "Extracted archive is too large (maximum is {} MiB)",
+                    MAX_EXTRACTED_BYTES / (1024 * 1024)
+                ));
             }
         }
-        return Err(format!("Unsupported archive format: {}", file_name));
+    }
+    Ok(())
+}
+
+fn replace_staged_theme(staged: &Path, dest: &Path, target_root: &Path) -> Result<(), String> {
+    let backup_dir = tempfile::tempdir_in(target_root)
+        .map_err(|e| format!("Failed to create replacement backup: {}", e))?;
+    let backup = backup_dir.path().join("previous-theme");
+    let had_existing = fs::symlink_metadata(dest).is_ok();
+
+    if had_existing {
+        fs::rename(dest, &backup)
+            .map_err(|e| format!("Could not stage existing theme '{}': {}", dest.display(), e))?;
+    }
+
+    if let Err(error) = fs::rename(staged, dest) {
+        if had_existing {
+            let _ = fs::rename(&backup, dest);
+        }
+        return Err(format!("Failed to install '{}': {}", dest.display(), error));
     }
 
     Ok(())
 }
 
 /// Recursively searches for theme root folders
-fn find_theme_roots(root: &Path) -> Vec<PathBuf> {
+fn find_theme_roots(root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut theme_roots = Vec::new();
 
-    for entry in WalkDir::new(root).max_depth(4).into_iter().flatten() {
+    for entry in WalkDir::new(root).max_depth(8).into_iter() {
+        let entry = entry.map_err(|e| format!("Could not inspect extracted archive: {}", e))?;
         if entry.file_type().is_dir() {
             let p = entry.path();
             if p.join("cursors").is_dir()
@@ -155,19 +281,26 @@ fn find_theme_roots(root: &Path) -> Vec<PathBuf> {
         }
     }
 
-    theme_roots
+    Ok(theme_roots)
 }
 
 /// Determines the best name for the theme
 fn determine_theme_name(theme_dir: &Path) -> String {
     let index_file = theme_dir.join("index.theme");
     if let Ok(content) = fs::read_to_string(&index_file) {
+        let mut in_icon_theme = false;
         for line in content.lines() {
             let line = line.trim();
-            if let Some(val) = line.strip_prefix("Name=") {
-                let clean = val.trim();
-                if !clean.is_empty() {
-                    return sanitize_theme_name(clean);
+            if line.starts_with('[') && line.ends_with(']') {
+                in_icon_theme = line.eq_ignore_ascii_case("[Icon Theme]");
+                continue;
+            }
+            if in_icon_theme {
+                if let Some(val) = line.strip_prefix("Name=") {
+                    let clean = val.trim();
+                    if !clean.is_empty() {
+                        return sanitize_theme_name(clean);
+                    }
                 }
             }
         }
@@ -218,7 +351,7 @@ fn ensure_index_theme(theme_dir: &Path, name: &str) -> Result<(), String> {
     let index_file = theme_dir.join("index.theme");
     if !index_file.exists() {
         let content = format!(
-            "[Icon Theme]\nName={}\nComment=Imported with mouse-me\nInherits=core\n",
+            "[Icon Theme]\nName={}\nComment=Imported with mouse-me\n",
             name
         );
         fs::write(&index_file, content).map_err(|e| e.to_string())?;
@@ -261,15 +394,6 @@ fn is_safe_relative_link(target: &Path) -> bool {
                 Component::ParentDir | Component::RootDir | Component::Prefix(_)
             )
         })
-}
-
-fn remove_existing_path(path: &Path) -> io::Result<()> {
-    let metadata = fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() || metadata.file_type().is_file() {
-        fs::remove_file(path)
-    } else {
-        fs::remove_dir_all(path)
-    }
 }
 
 #[cfg(test)]

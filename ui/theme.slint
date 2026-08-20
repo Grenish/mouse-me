@@ -84,6 +84,7 @@ export component Chip inherits Rectangle {
     in property <bool> active;
     callback clicked;
 
+    horizontal-stretch: 0;
     height: 36px;
     border-radius: 18px;
     border-width: 1px;
@@ -91,11 +92,9 @@ export component Chip inherits Rectangle {
     background: root.active ? #6B946833 : (touch.has-hover ? Ink.ghost : #00000000);
 
     HorizontalLayout {
-        width: 100%;
-        height: 100%;
-        alignment: center;
         padding-left: 12px;
         padding-right: 12px;
+        alignment: center;
         Text {
             text: root.label;
             font-size: 11px;
@@ -109,6 +108,31 @@ export component Chip inherits Rectangle {
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+}
+
+export component Tag inherits Rectangle {
+    in property <string> label;
+    in property <color> fill: Ink.ghost;
+    in property <color> ink: Ink.fog;
+
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    height: 20px;
+    border-radius: 6px;
+    background: root.fill;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        alignment: center;
+        Text {
+            text: root.label;
+            font-size: 10px;
+            font-weight: 700;
+            color: root.ink;
+            vertical-alignment: center;
+        }
     }
 }
 
