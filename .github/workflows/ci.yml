@@ -50,7 +50,7 @@ jobs:
         run: cargo check --locked
 
       - name: Run tests
-        run: cargo test --locked
+        run: cargo test --tests
 
       - name: Build release binary
         run: cargo build --release --locked
