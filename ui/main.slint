@@ -1,5 +1,17 @@
 import { ScrollView } from "std-widgets.slint";
-import { Ink, Type, Display, NavBtn, Chip, SizePill, Toggle, ToggleRow, FillBtn, Field, PreviewSlot } from "theme.slint";
+import {
+    Ink,
+    Type,
+    Display,
+    NavBtn,
+    Chip,
+    SizePill,
+    Toggle,
+    ToggleRow,
+    FillBtn,
+    Field,
+    PreviewSlot,
+} from "theme.slint";
 
 export struct ThemeItem {
     name: string,
@@ -102,6 +114,7 @@ export component MainWindow inherits Window {
     callback check_for_update();
     callback open_support();
     callback open_x();
+    callback open_contribute();
 
     function go(p: int) {
         root.page = p;
@@ -169,7 +182,10 @@ export component MainWindow inherits Window {
                     vertical-alignment: center;
                 }
 
-                Rectangle { height: 8px; background: transparent; }
+                Rectangle {
+                    height: 8px;
+                    background: transparent;
+                }
 
                 NavBtn {
                     icon: @image-url("../assets/icons/house.svg");
@@ -177,18 +193,21 @@ export component MainWindow inherits Window {
                     active: root.page == 0;
                     clicked => { root.go(0); }
                 }
+
                 NavBtn {
                     icon: @image-url("../assets/icons/download-simple.svg");
                     label: "Import";
                     active: root.page == 1;
                     clicked => { root.go(1); }
                 }
+
                 NavBtn {
                     icon: @image-url("../assets/icons/avocado.svg");
                     label: "Studio";
                     active: root.page == 2;
                     clicked => { root.go(2); }
                 }
+
                 NavBtn {
                     icon: @image-url("../assets/icons/info.svg");
                     label: "About";
@@ -207,6 +226,7 @@ export component MainWindow inherits Window {
                     active: root.page == 4;
                     clicked => { root.go(4); }
                 }
+
                 NavBtn {
                     icon: @image-url("../assets/icons/gear.svg");
                     label: "Settings";
@@ -245,6 +265,7 @@ export component MainWindow inherits Window {
                             font-weight: 700;
                             color: Ink.ivory;
                         }
+
                         Text {
                             text: root.page-sub;
                             font-size: 13px;
@@ -278,14 +299,55 @@ export component MainWindow inherits Window {
                             value: root.search_query;
                             edited(t) => { root.search_changed(t); }
                         }
-                        Chip { label: "All"; active: root.library_filter == "all"; clicked => { root.library_filter = "all"; root.filter_changed(); } }
-                        Chip { label: "User"; active: root.library_filter == "user"; clicked => { root.library_filter = "user"; root.filter_changed(); } }
-                        Chip { label: "System"; active: root.library_filter == "system"; clicked => { root.library_filter = "system"; root.filter_changed(); } }
-                        Rectangle { width: 8px; height: 36px; background: transparent; }
-                        Chip { label: "Any format"; active: root.library_type == "all"; clicked => { root.library_type = "all"; root.filter_changed(); } }
-                        Chip { label: "XCursor"; active: root.library_type == "xcursor"; clicked => { root.library_type = "xcursor"; root.filter_changed(); } }
-                        Chip { label: "Hyprcursor"; active: root.library_type == "hyprcursor"; clicked => { root.library_type = "hyprcursor"; root.filter_changed(); } }
-                        Rectangle { horizontal-stretch: 1; height: 36px; background: transparent; }
+
+                        Chip {
+                            label: "All";
+                            active: root.library_filter == "all";
+                            clicked => { root.library_filter = "all"; root.filter_changed(); }
+                        }
+
+                        Chip {
+                            label: "User";
+                            active: root.library_filter == "user";
+                            clicked => { root.library_filter = "user"; root.filter_changed(); }
+                        }
+
+                        Chip {
+                            label: "System";
+                            active: root.library_filter == "system";
+                            clicked => { root.library_filter = "system"; root.filter_changed(); }
+                        }
+
+                        Rectangle {
+                            width: 8px;
+                            height: 36px;
+                            background: transparent;
+                        }
+
+                        Chip {
+                            label: "Any format";
+                            active: root.library_type == "all";
+                            clicked => { root.library_type = "all"; root.filter_changed(); }
+                        }
+
+                        Chip {
+                            label: "XCursor";
+                            active: root.library_type == "xcursor";
+                            clicked => { root.library_type = "xcursor"; root.filter_changed(); }
+                        }
+
+                        Chip {
+                            label: "Hyprcursor";
+                            active: root.library_type == "hyprcursor";
+                            clicked => { root.library_type = "hyprcursor"; root.filter_changed(); }
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height: 36px;
+                            background: transparent;
+                        }
+
                         Text {
                             text: root.theme_count + " packs";
                             font-size: 12px;
@@ -305,11 +367,36 @@ export component MainWindow inherits Window {
                             vertical-alignment: center;
                             height: 100%;
                         }
-                        SizePill { px: 16; active: root.active_size == 16; clicked => { root.size_changed(16); } }
-                        SizePill { px: 24; active: root.active_size == 24; clicked => { root.size_changed(24); } }
-                        SizePill { px: 32; active: root.active_size == 32; clicked => { root.size_changed(32); } }
-                        SizePill { px: 48; active: root.active_size == 48; clicked => { root.size_changed(48); } }
-                        SizePill { px: 64; active: root.active_size == 64; clicked => { root.size_changed(64); } }
+
+                        SizePill {
+                            px: 16;
+                            active: root.active_size == 16;
+                            clicked => { root.size_changed(16); }
+                        }
+
+                        SizePill {
+                            px: 24;
+                            active: root.active_size == 24;
+                            clicked => { root.size_changed(24); }
+                        }
+
+                        SizePill {
+                            px: 32;
+                            active: root.active_size == 32;
+                            clicked => { root.size_changed(32); }
+                        }
+
+                        SizePill {
+                            px: 48;
+                            active: root.active_size == 48;
+                            clicked => { root.size_changed(48); }
+                        }
+
+                        SizePill {
+                            px: 64;
+                            active: root.active_size == 64;
+                            clicked => { root.size_changed(64); }
+                        }
                     }
 
                     if root.theme_count == 0: Rectangle {
@@ -329,17 +416,27 @@ export component MainWindow inherits Window {
                                 color: Ink.ivory;
                                 horizontal-alignment: center;
                             }
+
                             Text {
                                 text: "Import a zip from the Import page, or cut a pointer in Studio.";
                                 font-size: 13px;
                                 color: Ink.mist;
                                 horizontal-alignment: center;
                             }
+
                             HorizontalLayout {
                                 alignment: center;
                                 spacing: 8px;
-                                FillBtn { label: "Import a pack"; clicked => { root.go(1); } }
-                                FillBtn { label: "Open Studio"; quiet: true; clicked => { root.go(2); } }
+                                FillBtn {
+                                    label: "Import a pack";
+                                    clicked => { root.go(1); }
+                                }
+
+                                FillBtn {
+                                    label: "Open Studio";
+                                    quiet: true;
+                                    clicked => { root.go(2); }
+                                }
                             }
                         }
                     }
@@ -380,10 +477,21 @@ export component MainWindow inherits Window {
                                                 spacing: 8px;
                                                 padding-left: 10px;
                                                 padding-right: 10px;
-                                                PreviewSlot { frame: item.preview_default; }
-                                                PreviewSlot { frame: item.preview_pointer; }
-                                                PreviewSlot { frame: item.preview_wait; }
-                                                PreviewSlot { frame: item.preview_text; }
+                                                PreviewSlot {
+                                                    frame: item.preview_default;
+                                                }
+
+                                                PreviewSlot {
+                                                    frame: item.preview_pointer;
+                                                }
+
+                                                PreviewSlot {
+                                                    frame: item.preview_wait;
+                                                }
+
+                                                PreviewSlot {
+                                                    frame: item.preview_text;
+                                                }
                                             }
                                             if !item.has_preview: Text {
                                                 height: 32px;
@@ -413,6 +521,7 @@ export component MainWindow inherits Window {
                                                 vertical-alignment: center;
                                                 height: 100%;
                                             }
+
                                             Rectangle {
                                                 height: 20px;
                                                 border-radius: 6px;
@@ -432,6 +541,7 @@ export component MainWindow inherits Window {
                                                     }
                                                 }
                                             }
+
                                             if item.is_user: Rectangle {
                                                 height: 20px;
                                                 border-radius: 6px;
@@ -484,25 +594,25 @@ export component MainWindow inherits Window {
                                         alignment: center;
                                         vertical-stretch: 1;
                                         HorizontalLayout {
-                                        spacing: 8px;
+                                            spacing: 8px;
 
-                                        if item.is_deletable: FillBtn {
-                                            label: "Remove";
-                                            quiet: true;
-                                            danger: true;
-                                            clicked => { root.delete_theme(item.name); }
-                                        }
+                                            if item.is_deletable: FillBtn {
+                                                label: "Remove";
+                                                quiet: true;
+                                                danger: true;
+                                                clicked => { root.delete_theme(item.name); }
+                                            }
 
-                                        FillBtn {
-                                            label: item.is_active ? "Applied" : "Apply";
-                                            quiet: item.is_active;
-                                            clicked => {
-                                                if !item.is_active {
-                                                    root.apply_theme(item.name, root.active_size);
+                                            FillBtn {
+                                                label: item.is_active ? "Applied" : "Apply";
+                                                quiet: item.is_active;
+                                                clicked => {
+                                                    if !item.is_active {
+                                                        root.apply_theme(item.name, root.active_size);
+                                                    }
                                                 }
                                             }
                                         }
-                                    }
                                     }
                                 }
                             }
@@ -564,6 +674,7 @@ export component MainWindow inherits Window {
                                     color: Ink.ivory;
                                     horizontal-alignment: center;
                                 }
+
                                 Text {
                                     text: root.import_note;
                                     font-size: 13px;
@@ -579,6 +690,7 @@ export component MainWindow inherits Window {
                                         label: "Browse archive";
                                         clicked => { root.import_theme_dialog(); }
                                     }
+
                                     FillBtn {
                                         label: "Browse folder";
                                         quiet: true;
@@ -612,6 +724,7 @@ export component MainWindow inherits Window {
                                 font-weight: 700;
                                 color: Ink.mist;
                             }
+
                             ScrollView {
                                 vertical-stretch: 1;
                                 VerticalLayout {
@@ -637,6 +750,7 @@ export component MainWindow inherits Window {
                                                     background: role.assigned ? Ink.sage : Ink.stroke-strong;
                                                 }
                                             }
+
                                             Text {
                                                 text: role.label;
                                                 font-size: 12px;
@@ -707,6 +821,7 @@ export component MainWindow inherits Window {
                                             color: #4D5C46;
                                             horizontal-alignment: center;
                                         }
+
                                         Text {
                                             text: "Pick a PNG, or drop one here.";
                                             font-size: 12px;
@@ -731,8 +846,7 @@ export component MainWindow inherits Window {
                                             if root.studio_has_preview {
                                                 root.studio_set_hotspot(
                                                     self.mouse-x / self.width,
-                                                    self.mouse-y / self.height
-                                                );
+                                                    self.mouse-y / self.height);
                                             } else {
                                                 root.studio_pick_image();
                                             }
@@ -743,8 +857,17 @@ export component MainWindow inherits Window {
                                 HorizontalLayout {
                                     height: 36px;
                                     spacing: 8px;
-                                    FillBtn { label: "Choose PNG"; clicked => { root.studio_pick_image(); } }
-                                    FillBtn { label: "Use on every role"; quiet: true; clicked => { root.studio_use_for_all(); } }
+                                    FillBtn {
+                                        label: "Choose PNG";
+                                        clicked => { root.studio_pick_image(); }
+                                    }
+
+                                    FillBtn {
+                                        label: "Use on every role";
+                                        quiet: true;
+                                        clicked => { root.studio_use_for_all(); }
+                                    }
+
                                     Text {
                                         text: "Hotspot  " + root.studio_hotspot_x + " × " + root.studio_hotspot_y;
                                         font-size: 11px;
@@ -772,27 +895,62 @@ export component MainWindow inherits Window {
                             padding: 16px;
                             spacing: 12px;
 
-                            Display { text: "Theme"; font-size: 11px; font-weight: 700; color: Ink.mist; }
+                            Display {
+                                text: "Theme";
+                                font-size: 11px;
+                                font-weight: 700;
+                                color: Ink.mist;
+                            }
+
                             Field {
                                 placeholder: "Name";
                                 value <=> root.studio_name;
                             }
+
                             Field {
                                 placeholder: "Comment (optional)";
                                 value <=> root.studio_comment;
                             }
 
-                            Display { text: "Nominal size"; font-size: 11px; font-weight: 700; color: Ink.mist; }
+                            Display {
+                                text: "Nominal size";
+                                font-size: 11px;
+                                font-weight: 700;
+                                color: Ink.mist;
+                            }
+
                             HorizontalLayout {
                                 height: 36px;
                                 spacing: 6px;
-                                SizePill { px: 24; active: root.studio_size == 24; clicked => { root.studio_size = 24; } }
-                                SizePill { px: 32; active: root.studio_size == 32; clicked => { root.studio_size = 32; } }
-                                SizePill { px: 48; active: root.studio_size == 48; clicked => { root.studio_size = 48; } }
-                                SizePill { px: 64; active: root.studio_size == 64; clicked => { root.studio_size = 64; } }
+                                SizePill {
+                                    px: 24;
+                                    active: root.studio_size == 24;
+                                    clicked => { root.studio_size = 24; }
+                                }
+
+                                SizePill {
+                                    px: 32;
+                                    active: root.studio_size == 32;
+                                    clicked => { root.studio_size = 32; }
+                                }
+
+                                SizePill {
+                                    px: 48;
+                                    active: root.studio_size == 48;
+                                    clicked => { root.studio_size = 48; }
+                                }
+
+                                SizePill {
+                                    px: 64;
+                                    active: root.studio_size == 64;
+                                    clicked => { root.studio_size = 64; }
+                                }
                             }
 
-                            Rectangle { vertical-stretch: 1; background: transparent; }
+                            Rectangle {
+                                vertical-stretch: 1;
+                                background: transparent;
+                            }
 
                             Text {
                                 text: "Exports into ~/.local/share/icons as an XCursor pack, with aliases for GTK and X11.";
@@ -800,6 +958,7 @@ export component MainWindow inherits Window {
                                 color: Ink.mist;
                                 wrap: word-wrap;
                             }
+
                             FillBtn {
                                 label: "Export and install";
                                 clicked => { root.studio_export(); }
@@ -858,6 +1017,7 @@ export component MainWindow inherits Window {
                                 horizontal-alignment: center;
                                 wrap: word-wrap;
                             }
+
                             Text {
                                 text: "Choose a pack in the library and apply it. Mouse Me writes the theme and size into the live session, desktop settings, and your user environment so the rest of the system follows. Import an archive or a folder, or assemble a simple XCursor theme in Studio.";
                                 font-size: 13px;
@@ -877,6 +1037,7 @@ export component MainWindow inherits Window {
                                     vertical-alignment: center;
                                     height: 36px;
                                 }
+
                                 FillBtn {
                                     label: "Check for updates";
                                     quiet: true;
@@ -902,12 +1063,21 @@ export component MainWindow inherits Window {
                                     icon: @image-url("../assets/icons/coffee.svg");
                                     clicked => { root.open_support(); }
                                 }
+
                                 FillBtn {
                                     label: "Follow on X";
                                     quiet: true;
                                     with-icon: true;
                                     icon: @image-url("../assets/icons/x-logo.svg");
                                     clicked => { root.open_x(); }
+                                }
+
+                                FillBtn {
+                                    label: "Contribute";
+                                    quiet: true;
+                                    with-icon: true;
+                                    icon: @image-url("../assets/icons/github-logo.svg");
+                                    clicked => { root.open_contribute(); }
                                 }
                             }
                         }
@@ -958,6 +1128,7 @@ export component MainWindow inherits Window {
                                 color: Ink.ivory;
                                 horizontal-alignment: center;
                             }
+
                             Text {
                                 text: "Accounts are not wired up yet. This page is reserved for signing in and syncing your packs.";
                                 font-size: 13px;
@@ -965,6 +1136,7 @@ export component MainWindow inherits Window {
                                 horizontal-alignment: center;
                                 wrap: word-wrap;
                             }
+
                             HorizontalLayout {
                                 alignment: center;
                                 FillBtn {
@@ -990,22 +1162,54 @@ export component MainWindow inherits Window {
                             VerticalLayout {
                                 padding: 16px;
                                 spacing: 4px;
-                                Display { text: "Pointer size"; font-size: 11px; font-weight: 700; color: Ink.mist; }
+                                Display {
+                                    text: "Pointer size";
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    color: Ink.mist;
+                                }
+
                                 HorizontalLayout {
                                     height: 36px;
                                     spacing: 6px;
-                                    SizePill { px: 16; active: root.active_size == 16; clicked => { root.size_changed(16); } }
-                                    SizePill { px: 24; active: root.active_size == 24; clicked => { root.size_changed(24); } }
-                                    SizePill { px: 32; active: root.active_size == 32; clicked => { root.size_changed(32); } }
-                                    SizePill { px: 48; active: root.active_size == 48; clicked => { root.size_changed(48); } }
-                                    SizePill { px: 64; active: root.active_size == 64; clicked => { root.size_changed(64); } }
+                                    SizePill {
+                                        px: 16;
+                                        active: root.active_size == 16;
+                                        clicked => { root.size_changed(16); }
+                                    }
+
+                                    SizePill {
+                                        px: 24;
+                                        active: root.active_size == 24;
+                                        clicked => { root.size_changed(24); }
+                                    }
+
+                                    SizePill {
+                                        px: 32;
+                                        active: root.active_size == 32;
+                                        clicked => { root.size_changed(32); }
+                                    }
+
+                                    SizePill {
+                                        px: 48;
+                                        active: root.active_size == 48;
+                                        clicked => { root.size_changed(48); }
+                                    }
+
+                                    SizePill {
+                                        px: 64;
+                                        active: root.active_size == 64;
+                                        clicked => { root.size_changed(64); }
+                                    }
                                 }
+
                                 ToggleRow {
                                     title: "Apply size immediately";
                                     hint: "Changing a size pill writes it to the live session.";
                                     checked <=> root.apply_size_immediately;
                                     toggled => { root.settings_changed(); }
                                 }
+
                                 ToggleRow {
                                     title: "Apply imported packs";
                                     hint: "After a successful import, switch to the new theme.";
@@ -1023,15 +1227,68 @@ export component MainWindow inherits Window {
                             VerticalLayout {
                                 padding: 16px;
                                 spacing: 2px;
-                                Display { text: "Where it writes"; font-size: 11px; font-weight: 700; color: Ink.mist; }
-                                ToggleRow { title: "Hyprland"; hint: "hyprctl setcursor for the live session."; checked <=> root.apply_hyprland; toggled => { root.settings_changed(); } }
-                                ToggleRow { title: "GSettings"; hint: "org.gnome.desktop.interface cursor theme and size."; checked <=> root.apply_gsettings; toggled => { root.settings_changed(); } }
-                                ToggleRow { title: "GTK 2/3/4 configs"; hint: "settings.ini and gtkrc-2.0."; checked <=> root.apply_gtk; toggled => { root.settings_changed(); } }
-                                ToggleRow { title: "Qt / KDE"; hint: "kdeglobals Mouse section."; checked <=> root.apply_qt; toggled => { root.settings_changed(); } }
-                                ToggleRow { title: "User environment"; hint: "environment.d with XCURSOR and HYPRCURSOR."; checked <=> root.apply_environment; toggled => { root.settings_changed(); } }
-                                ToggleRow { title: "X11 resources"; hint: ".Xresources and xrdb merge."; checked <=> root.apply_xresources; toggled => { root.settings_changed(); } }
-                                ToggleRow { title: "Default index.theme"; hint: "Inherits the chosen theme from ~/.icons/default."; checked <=> root.apply_default_index; toggled => { root.settings_changed(); } }
-                                ToggleRow { title: "Flatpak overrides"; hint: "Expose icon directories to sandboxed apps."; checked <=> root.apply_flatpak; toggled => { root.settings_changed(); } }
+                                Display {
+                                    text: "Where it writes";
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    color: Ink.mist;
+                                }
+
+                                ToggleRow {
+                                    title: "Hyprland";
+                                    hint: "hyprctl setcursor for the live session.";
+                                    checked <=> root.apply_hyprland;
+                                    toggled => { root.settings_changed(); }
+                                }
+
+                                ToggleRow {
+                                    title: "GSettings";
+                                    hint: "org.gnome.desktop.interface cursor theme and size.";
+                                    checked <=> root.apply_gsettings;
+                                    toggled => { root.settings_changed(); }
+                                }
+
+                                ToggleRow {
+                                    title: "GTK 2/3/4 configs";
+                                    hint: "settings.ini and gtkrc-2.0.";
+                                    checked <=> root.apply_gtk;
+                                    toggled => { root.settings_changed(); }
+                                }
+
+                                ToggleRow {
+                                    title: "Qt / KDE";
+                                    hint: "kdeglobals Mouse section.";
+                                    checked <=> root.apply_qt;
+                                    toggled => { root.settings_changed(); }
+                                }
+
+                                ToggleRow {
+                                    title: "User environment";
+                                    hint: "environment.d with XCURSOR and HYPRCURSOR.";
+                                    checked <=> root.apply_environment;
+                                    toggled => { root.settings_changed(); }
+                                }
+
+                                ToggleRow {
+                                    title: "X11 resources";
+                                    hint: ".Xresources and xrdb merge.";
+                                    checked <=> root.apply_xresources;
+                                    toggled => { root.settings_changed(); }
+                                }
+
+                                ToggleRow {
+                                    title: "Default index.theme";
+                                    hint: "Inherits the chosen theme from ~/.icons/default.";
+                                    checked <=> root.apply_default_index;
+                                    toggled => { root.settings_changed(); }
+                                }
+
+                                ToggleRow {
+                                    title: "Flatpak overrides";
+                                    hint: "Expose icon directories to sandboxed apps.";
+                                    checked <=> root.apply_flatpak;
+                                    toggled => { root.settings_changed(); }
+                                }
                             }
                         }
 
@@ -1043,11 +1300,41 @@ export component MainWindow inherits Window {
                             VerticalLayout {
                                 padding: 16px;
                                 spacing: 2px;
-                                Display { text: "Hyprland cursor"; font-size: 11px; font-weight: 700; color: Ink.mist; }
-                                ToggleRow { title: "Enable Hyprcursor"; hint: "Prefer hyprcursor assets when a pack includes them."; checked <=> root.enable_hyprcursor; toggled => { root.hypr_prefs_changed(); } }
-                                ToggleRow { title: "Hide on key press"; hint: "Conceal the pointer while typing."; checked <=> root.hide_on_key_press; toggled => { root.hypr_prefs_changed(); } }
-                                ToggleRow { title: "Hide on touch"; hint: "Conceal the pointer during touch input."; checked <=> root.hide_on_touch; toggled => { root.hypr_prefs_changed(); } }
-                                ToggleRow { title: "No hardware cursors"; hint: "Force software rendering for the pointer."; checked <=> root.no_hardware_cursors; toggled => { root.hypr_prefs_changed(); } }
+                                Display {
+                                    text: "Hyprland cursor";
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    color: Ink.mist;
+                                }
+
+                                ToggleRow {
+                                    title: "Enable Hyprcursor";
+                                    hint: "Prefer hyprcursor assets when a pack includes them.";
+                                    checked <=> root.enable_hyprcursor;
+                                    toggled => { root.hypr_prefs_changed(); }
+                                }
+
+                                ToggleRow {
+                                    title: "Hide on key press";
+                                    hint: "Conceal the pointer while typing.";
+                                    checked <=> root.hide_on_key_press;
+                                    toggled => { root.hypr_prefs_changed(); }
+                                }
+
+                                ToggleRow {
+                                    title: "Hide on touch";
+                                    hint: "Conceal the pointer during touch input.";
+                                    checked <=> root.hide_on_touch;
+                                    toggled => { root.hypr_prefs_changed(); }
+                                }
+
+                                ToggleRow {
+                                    title: "No hardware cursors";
+                                    hint: "Force software rendering for the pointer.";
+                                    checked <=> root.no_hardware_cursors;
+                                    toggled => { root.hypr_prefs_changed(); }
+                                }
+
                                 HorizontalLayout {
                                     padding-top: 8px;
                                     padding-bottom: 8px;
@@ -1056,17 +1343,47 @@ export component MainWindow inherits Window {
                                         spacing: 3px;
                                         alignment: center;
                                         horizontal-stretch: 1;
-                                        Display { text: "Inactive timeout"; font-size: 13px; font-weight: 600; color: Ink.ivory; }
-                                        Text { text: root.inactive_timeout == 0 ? "Stay visible" : root.inactive_timeout + " seconds until hide"; font-size: 11px; color: Ink.mist; }
+                                        Display {
+                                            text: "Inactive timeout";
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            color: Ink.ivory;
+                                        }
+
+                                        Text {
+                                            text: root.inactive_timeout == 0 ? "Stay visible" : root.inactive_timeout + " seconds until hide";
+                                            font-size: 11px;
+                                            color: Ink.mist;
+                                        }
                                     }
+
                                     VerticalLayout {
                                         alignment: center;
                                         HorizontalLayout {
                                             spacing: 6px;
-                                            Chip { label: "Off"; active: root.inactive_timeout == 0; clicked => { root.inactive_timeout = 0; root.hypr_prefs_changed(); } }
-                                            Chip { label: "3s"; active: root.inactive_timeout == 3; clicked => { root.inactive_timeout = 3; root.hypr_prefs_changed(); } }
-                                            Chip { label: "5s"; active: root.inactive_timeout == 5; clicked => { root.inactive_timeout = 5; root.hypr_prefs_changed(); } }
-                                            Chip { label: "10s"; active: root.inactive_timeout == 10; clicked => { root.inactive_timeout = 10; root.hypr_prefs_changed(); } }
+                                            Chip {
+                                                label: "Off";
+                                                active: root.inactive_timeout == 0;
+                                                clicked => { root.inactive_timeout = 0; root.hypr_prefs_changed(); }
+                                            }
+
+                                            Chip {
+                                                label: "3s";
+                                                active: root.inactive_timeout == 3;
+                                                clicked => { root.inactive_timeout = 3; root.hypr_prefs_changed(); }
+                                            }
+
+                                            Chip {
+                                                label: "5s";
+                                                active: root.inactive_timeout == 5;
+                                                clicked => { root.inactive_timeout = 5; root.hypr_prefs_changed(); }
+                                            }
+
+                                            Chip {
+                                                label: "10s";
+                                                active: root.inactive_timeout == 10;
+                                                clicked => { root.inactive_timeout = 10; root.hypr_prefs_changed(); }
+                                            }
                                         }
                                     }
                                 }
@@ -1081,15 +1398,30 @@ export component MainWindow inherits Window {
                             VerticalLayout {
                                 padding: 16px;
                                 spacing: 2px;
-                                Display { text: "Library"; font-size: 11px; font-weight: 700; color: Ink.mist; }
-                                ToggleRow { title: "Show user packs"; hint: "Themes installed under your home directory."; checked <=> root.show_user_themes; toggled => { root.filter_changed(); } }
-                                ToggleRow { title: "Show system packs"; hint: "Themes from /usr/share/icons and friends."; checked <=> root.show_system_themes; toggled => { root.filter_changed(); } }
+                                Display {
+                                    text: "Library";
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    color: Ink.mist;
+                                }
+
+                                ToggleRow {
+                                    title: "Show user packs";
+                                    hint: "Themes installed under your home directory.";
+                                    checked <=> root.show_user_themes;
+                                    toggled => { root.filter_changed(); }
+                                }
+
+                                ToggleRow {
+                                    title: "Show system packs";
+                                    hint: "Themes from /usr/share/icons and friends.";
+                                    checked <=> root.show_system_themes;
+                                    toggled => { root.filter_changed(); }
+                                }
                             }
                         }
-
                     }
                 }
-
             }
         }
     }
