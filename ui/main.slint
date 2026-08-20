@@ -95,6 +95,15 @@ export component MainWindow inherits Window {
     in-out property <string> app_version: "0.1.0";
     in-out property <string> update_note: "";
 
+    in-out property <bool> auth_signed_in: false;
+    in-out property <bool> auth_creating: false;
+    in-out property <bool> auth_busy: false;
+    in-out property <string> auth_email: "";
+    in-out property <string> auth_password: "";
+    in-out property <string> auth_confirm: "";
+    in-out property <string> auth_session_email: "";
+    in-out property <string> auth_error: "";
+
     callback apply_theme(string, int);
     callback import_theme_dialog();
     callback import_folder_dialog();
@@ -118,23 +127,34 @@ export component MainWindow inherits Window {
     callback open_support();
     callback open_x();
     callback open_contribute();
+    callback sign_in();
+    callback create_account();
+    callback sign_out();
 
     function go(p: int) {
         root.page = p;
         root.page_changed(p);
     }
 
+    function submit-auth() {
+        if root.auth_creating {
+            root.create_account();
+        } else {
+            root.sign_in();
+        }
+    }
+
     property <string> page-title: root.page == 0 ? "Library"
         : root.page == 1 ? "Import"
         : root.page == 2 ? "Studio"
         : root.page == 3 ? "About"
-        : root.page == 4 ? "Sign in"
+        : root.page == 4 ? (root.auth_signed_in ? "Account" : (root.auth_creating ? "Create account" : "Sign in"))
         : "Settings";
     property <string> page-sub: root.page == 0 ? "Every pointer installed on this machine."
         : root.page == 1 ? "Install a pack from an archive or a folder."
         : root.page == 2 ? "Build an XCursor theme from PNG frames."
         : root.page == 3 ? "What Mouse Me is, and where it lives on disk."
-        : root.page == 4 ? "Account sign-in will land here later."
+        : root.page == 4 ? (root.auth_signed_in ? "You're signed in on this computer." : (root.auth_creating ? "Create an email and password for this computer." : "Sign in with your email and password."))
         : "Where the pointer is applied, and how it behaves.";
 
     HorizontalLayout {
@@ -225,7 +245,7 @@ export component MainWindow inherits Window {
 
                 NavBtn {
                     icon: @image-url("../assets/icons/user.svg");
-                    label: "User";
+                    label: root.auth_signed_in ? "Account" : "User";
                     active: root.page == 4;
                     clicked => { root.go(4); }
                 }
@@ -276,7 +296,7 @@ export component MainWindow inherits Window {
                         }
                     }
 
-                    VerticalLayout {
+                    if root.page != 4: VerticalLayout {
                         alignment: center;
                         FillBtn {
                             label: "Refresh";
@@ -512,25 +532,29 @@ export component MainWindow inherits Window {
                                     }
 
                                     VerticalLayout {
-                                        spacing: 4px;
+                                        spacing: 5px;
                                         alignment: center;
                                         horizontal-stretch: 1;
                                         vertical-stretch: 1;
 
-                                        HorizontalLayout {
-                                            height: 20px;
-                                            spacing: 8px;
-                                            Display {
-                                                text: item.display_name;
-                                                font-size: 15px;
-                                                font-weight: 700;
-                                                color: Ink.ivory;
-                                                vertical-alignment: center;
-                                                height: 100%;
-                                                horizontal-stretch: 1;
-                                                overflow: elide;
-                                            }
+                                        Display {
+                                            text: item.display_name;
+                                            font-size: 15px;
+                                            font-weight: 700;
+                                            color: Ink.ivory;
+                                            overflow: elide;
+                                        }
 
+                                        Text {
+                                            text: item.comment != "" ? item.comment : item.path;
+                                            font-size: 11px;
+                                            color: Ink.mist;
+                                            overflow: elide;
+                                        }
+
+                                        HorizontalLayout {
+                                            spacing: 6px;
+                                            alignment: start;
                                             Tag {
                                                 label: item.cursor_type;
                                                 fill: item.cursor_type == "Hyprcursor" ? #1E4F3455 : Ink.ghost;
@@ -546,13 +570,6 @@ export component MainWindow inherits Window {
                                                 fill: #C9845A33;
                                                 ink: Ink.click;
                                             }
-                                        }
-
-                                        Text {
-                                            text: item.comment != "" ? item.comment : item.path;
-                                            font-size: 11px;
-                                            color: Ink.mist;
-                                            overflow: elide;
                                         }
                                     }
 
@@ -1071,51 +1088,150 @@ export component MainWindow inherits Window {
 
                         VerticalLayout {
                             alignment: center;
-                            spacing: 14px;
                             padding: 32px;
 
                             HorizontalLayout {
                                 alignment: center;
-                                Rectangle {
-                                    width: 72px;
-                                    height: 72px;
-                                    border-radius: 36px;
-                                    clip: true;
-                                    background: Ink.ghost;
+                                VerticalLayout {
+                                    width: 360px;
+                                    spacing: 16px;
 
-                                    Image {
-                                        x: 20px;
-                                        y: 20px;
-                                        width: 32px;
-                                        height: 32px;
-                                        source: @image-url("../assets/icons/user.svg");
-                                        image-fit: contain;
-                                        colorize: Ink.parchment;
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 72px;
+                                            height: 72px;
+                                            border-radius: 36px;
+                                            clip: true;
+                                            background: Ink.ghost;
+
+                                            Image {
+                                                x: 20px;
+                                                y: 20px;
+                                                width: 32px;
+                                                height: 32px;
+                                                source: @image-url("../assets/icons/user.svg");
+                                                image-fit: contain;
+                                                colorize: Ink.parchment;
+                                            }
+                                        }
                                     }
-                                }
-                            }
 
-                            Display {
-                                text: "Sign in";
-                                font-size: 22px;
-                                font-weight: 700;
-                                color: Ink.ivory;
-                                horizontal-alignment: center;
-                            }
+                                    if root.auth_signed_in: VerticalLayout {
+                                        spacing: 16px;
 
-                            Text {
-                                text: "After signing in, your cursor packs will be synced across your devices.";
-                                font-size: 13px;
-                                color: Ink.mist;
-                                horizontal-alignment: center;
-                                wrap: word-wrap;
-                            }
+                                        Display {
+                                            text: root.auth_session_email;
+                                            font-size: 16px;
+                                            font-weight: 700;
+                                            color: Ink.ivory;
+                                            horizontal-alignment: center;
+                                        }
 
-                            HorizontalLayout {
-                                alignment: center;
-                                FillBtn {
-                                    label: "In Progress";
-                                    quiet: true;
+                                        Text {
+                                            text: "Packs still live only on this machine. Cloud sync is not wired up yet.";
+                                            font-size: 13px;
+                                            color: Ink.mist;
+                                            horizontal-alignment: center;
+                                            wrap: word-wrap;
+                                        }
+
+                                        FillBtn {
+                                            label: "Sign out";
+                                            quiet: true;
+                                            clicked => { root.sign_out(); }
+                                        }
+                                    }
+
+                                    if !root.auth_signed_in: VerticalLayout {
+                                        spacing: 14px;
+
+                                        VerticalLayout {
+                                            spacing: 4px;
+                                            Display {
+                                                text: "Email";
+                                                font-size: 11px;
+                                                font-weight: 700;
+                                                color: Ink.mist;
+                                            }
+                                            Field {
+                                                placeholder: "you@example.com";
+                                                value <=> root.auth_email;
+                                                accepted => { root.submit-auth(); }
+                                            }
+                                        }
+
+                                        VerticalLayout {
+                                            spacing: 4px;
+                                            Display {
+                                                text: "Password";
+                                                font-size: 11px;
+                                                font-weight: 700;
+                                                color: Ink.mist;
+                                            }
+                                            Field {
+                                                secret: true;
+                                                placeholder: "At least 8 characters";
+                                                value <=> root.auth_password;
+                                                accepted => { root.submit-auth(); }
+                                            }
+                                        }
+
+                                        if root.auth_creating: VerticalLayout {
+                                            spacing: 4px;
+                                            Display {
+                                                text: "Confirm password";
+                                                font-size: 11px;
+                                                font-weight: 700;
+                                                color: Ink.mist;
+                                            }
+                                            Field {
+                                                secret: true;
+                                                placeholder: "Repeat password";
+                                                value <=> root.auth_confirm;
+                                                accepted => { root.submit-auth(); }
+                                            }
+                                        }
+
+                                        if root.auth_error != "": Text {
+                                            text: root.auth_error;
+                                            font-size: 12px;
+                                            color: Ink.danger;
+                                            wrap: word-wrap;
+                                        }
+
+                                        FillBtn {
+                                            label: root.auth_creating ? "Create account" : "Sign in";
+                                            busy: root.auth_busy;
+                                            clicked => { root.submit-auth(); }
+                                        }
+
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 6px;
+                                            Text {
+                                                text: root.auth_creating ? "Already have an account?" : "No account yet?";
+                                                font-size: 12px;
+                                                color: Ink.mist;
+                                                vertical-alignment: center;
+                                            }
+                                            switcher := TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => {
+                                                    root.auth_creating = !root.auth_creating;
+                                                    root.auth_error = "";
+                                                    root.auth_confirm = "";
+                                                }
+                                                Text {
+                                                    text: root.auth_creating ? "Sign in" : "Create one";
+                                                    font-size: 12px;
+                                                    font-weight: 700;
+                                                    color: switcher.has-hover ? Ink.ivory : Ink.parchment;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

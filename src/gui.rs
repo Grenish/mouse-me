@@ -7,6 +7,7 @@ use std::rc::Rc;
 use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
 use mouse_me::core::applier::{apply_hypr_cursor_prefs, apply_with_targets};
+use mouse_me::core::auth::AuthStore;
 use mouse_me::core::importer::{import_cursor_pack, is_safe_theme_name};
 use mouse_me::core::scanner::{get_active_cursor, scan_cursor_themes};
 use mouse_me::core::settings::AppSettings;
@@ -31,6 +32,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     let settings = AppSettings::load();
     apply_settings_to_window(&main_window, &settings);
     main_window.set_app_version(SharedString::from(env!("CARGO_PKG_VERSION")));
+    apply_saved_session(&main_window);
     refresh_studio_roles(&main_window, &studio_images.borrow());
     refresh_ui_state(&main_window);
 
@@ -534,8 +536,92 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    {
+        let wh = window_handle.clone();
+        main_window.on_sign_in(move || {
+            let Some(w) = wh.upgrade() else { return };
+            run_auth(&w, |store, email, password, _confirm| {
+                store.sign_in(email, password)
+            });
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_create_account(move || {
+            let Some(w) = wh.upgrade() else { return };
+            run_auth(&w, |store, email, password, confirm| {
+                store.create_account(email, password, confirm)
+            });
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_sign_out(move || {
+            let Some(w) = wh.upgrade() else { return };
+            match AuthStore::load() {
+                Ok(mut store) => match store.sign_out() {
+                    Ok(()) => apply_auth_session(&w, None),
+                    Err(error) => w.set_auth_error(SharedString::from(error)),
+                },
+                Err(error) => w.set_auth_error(SharedString::from(error)),
+            }
+        });
+    }
+
     main_window.run()?;
     Ok(())
+}
+
+fn apply_saved_session(window: &MainWindow) {
+    match AuthStore::load() {
+        Ok(store) => apply_auth_session(window, store.session_email()),
+        Err(error) => window.set_auth_error(SharedString::from(error)),
+    }
+}
+
+fn apply_auth_session(window: &MainWindow, email: Option<&str>) {
+    window.set_auth_signed_in(email.is_some());
+    window.set_auth_creating(false);
+    window.set_auth_busy(false);
+    window.set_auth_error(SharedString::from(""));
+    window.set_auth_password(SharedString::from(""));
+    window.set_auth_confirm(SharedString::from(""));
+    match email {
+        Some(email) => {
+            window.set_auth_session_email(SharedString::from(email));
+            window.set_auth_email(SharedString::from(email));
+        }
+        None => window.set_auth_session_email(SharedString::from("")),
+    }
+}
+
+fn run_auth(
+    window: &MainWindow,
+    op: impl FnOnce(&mut AuthStore, &str, &str, &str) -> Result<String, String>,
+) {
+    if window.get_auth_busy() {
+        return;
+    }
+    window.set_auth_busy(true);
+    window.set_auth_error(SharedString::from(""));
+    let email = window.get_auth_email().to_string();
+    let password = window.get_auth_password().to_string();
+    let confirm = window.get_auth_confirm().to_string();
+    match AuthStore::load() {
+        Ok(mut store) => match op(&mut store, &email, &password, &confirm) {
+            Ok(session) => apply_auth_session(window, Some(&session)),
+            Err(error) => {
+                window.set_auth_busy(false);
+                window.set_auth_error(SharedString::from(error));
+            }
+        },
+        Err(error) => {
+            window.set_auth_busy(false);
+            window.set_auth_error(SharedString::from(error));
+        }
+    }
 }
 
 fn apply_settings_to_window(window: &MainWindow, settings: &AppSettings) {

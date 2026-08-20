@@ -119,20 +119,20 @@ export component Tag inherits Rectangle {
     horizontal-stretch: 0;
     vertical-stretch: 0;
     height: 20px;
+    width: caption.preferred-width + 16px;
     border-radius: 6px;
     background: root.fill;
 
-    HorizontalLayout {
-        padding-left: 8px;
-        padding-right: 8px;
-        alignment: center;
-        Text {
-            text: root.label;
-            font-size: 10px;
-            font-weight: 700;
-            color: root.ink;
-            vertical-alignment: center;
-        }
+    caption := Text {
+        x: 8px;
+        width: parent.width - 16px;
+        height: 100%;
+        text: root.label;
+        font-size: 10px;
+        font-weight: 700;
+        color: root.ink;
+        vertical-alignment: center;
+        horizontal-alignment: center;
     }
 }
 
@@ -327,8 +327,11 @@ export component PreviewSlot inherits Rectangle {
 
 export component Field inherits Rectangle {
     in property <string> placeholder;
+    in property <bool> secret: false;
     in-out property <string> value;
+    in-out property <bool> revealed: false;
     callback edited(string);
+    callback accepted;
 
     height: 36px;
     border-radius: 10px;
@@ -339,27 +342,48 @@ export component Field inherits Rectangle {
     input := TextInput {
         x: 12px;
         y: 0;
-        width: parent.width - 24px;
+        width: root.secret ? parent.width - 68px : parent.width - 24px;
         height: 100%;
         text <=> root.value;
         color: Ink.ivory;
         font-size: 13px;
         font-family: Type.body;
         single-line: true;
+        input-type: (root.secret && !root.revealed) ? InputType.password : InputType.text;
         vertical-alignment: center;
         horizontal-alignment: left;
         edited => { root.edited(self.text); }
+        accepted => { root.accepted(); }
     }
 
     if input.text == "": Text {
         x: 12px;
         y: 0;
-        width: parent.width - 24px;
+        width: root.secret ? parent.width - 68px : parent.width - 24px;
         height: 100%;
         text: root.placeholder;
         color: Ink.mist;
         font-size: 13px;
         vertical-alignment: center;
         horizontal-alignment: left;
+    }
+
+    if root.secret: reveal := TouchArea {
+        x: parent.width - 52px;
+        y: 0;
+        width: 44px;
+        height: 100%;
+        mouse-cursor: pointer;
+        clicked => { root.revealed = !root.revealed; }
+        Text {
+            width: 100%;
+            height: 100%;
+            text: root.revealed ? "Hide" : "Show";
+            font-size: 11px;
+            font-weight: 600;
+            color: reveal.has-hover ? Ink.ivory : Ink.mist;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
     }
 }

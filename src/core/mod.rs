@@ -1,4 +1,5 @@
 pub mod applier;
+pub mod auth;
 pub mod importer;
 pub mod scanner;
 pub mod settings;
