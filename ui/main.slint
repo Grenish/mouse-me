@@ -1,0 +1,1096 @@
+import { ScrollView } from "std-widgets.slint";
+import { Ink, Type, Display, NavBtn, Chip, SizePill, Toggle, ToggleRow, FillBtn, Field, PreviewSlot } from "theme.slint";
+
+export struct ThemeItem {
+    name: string,
+    display_name: string,
+    comment: string,
+    cursor_type: string,
+    is_active: bool,
+    is_deletable: bool,
+    is_user: bool,
+    path: string,
+    preview_default: image,
+    preview_pointer: image,
+    preview_wait: image,
+    preview_text: image,
+    has_preview: bool,
+}
+
+export struct StudioRole {
+    id: string,
+    label: string,
+    assigned: bool,
+}
+
+export component MainWindow inherits Window {
+    title: "Mouse Me";
+    min-width: 1080px;
+    min-height: 700px;
+    preferred-width: 1200px;
+    preferred-height: 780px;
+    background: Ink.desk;
+    default-font-family: Type.body;
+    default-font-size: 13px;
+    default-font-weight: 400;
+
+    in-out property <int> page: 0;
+    in-out property <string> active_theme_name: "";
+    in-out property <int> active_size: 24;
+    in-out property <[ThemeItem]> themes: [];
+    in-out property <string> search_query: "";
+    in-out property <string> library_filter: "all";
+    in-out property <string> library_type: "all";
+    in-out property <int> theme_count: 0;
+    in-out property <string> status_message: "Ready";
+    in-out property <bool> status_is_error: false;
+    in-out property <bool> is_loading: false;
+    in-out property <bool> checking_update: false;
+
+    in-out property <bool> apply_hyprland: true;
+    in-out property <bool> apply_gsettings: true;
+    in-out property <bool> apply_gtk: true;
+    in-out property <bool> apply_qt: true;
+    in-out property <bool> apply_environment: true;
+    in-out property <bool> apply_xresources: true;
+    in-out property <bool> apply_default_index: true;
+    in-out property <bool> apply_flatpak: true;
+    in-out property <bool> auto_apply_on_import: false;
+    in-out property <bool> apply_size_immediately: true;
+    in-out property <bool> show_user_themes: true;
+    in-out property <bool> show_system_themes: true;
+    in-out property <bool> enable_hyprcursor: true;
+    in-out property <bool> hide_on_key_press: false;
+    in-out property <bool> hide_on_touch: true;
+    in-out property <bool> no_hardware_cursors: false;
+    in-out property <int> inactive_timeout: 0;
+
+    in-out property <string> studio_name: "Custom Pointer";
+    in-out property <string> studio_comment: "";
+    in-out property <int> studio_size: 32;
+    in-out property <int> studio_hotspot_x: 0;
+    in-out property <int> studio_hotspot_y: 0;
+    in-out property <int> studio_img_w: 32;
+    in-out property <int> studio_img_h: 32;
+    in-out property <image> studio_preview;
+    in-out property <bool> studio_has_preview: false;
+    in-out property <string> studio_selected_role: "left_ptr";
+    in-out property <[StudioRole]> studio_roles: [];
+    in-out property <string> import_note: "Drop a zip, tar.gz, tar.xz, or an unpacked theme folder.";
+    in-out property <string> app_version: "0.1.0";
+    in-out property <string> update_note: "";
+
+    callback apply_theme(string, int);
+    callback import_theme_dialog();
+    callback import_folder_dialog();
+    callback import_dropped(data-transfer);
+    callback studio_file_dropped(data-transfer);
+    callback delete_theme(string);
+    callback refresh_themes();
+    callback search_changed(string);
+    callback size_changed(int);
+    callback page_changed(int);
+    callback filter_changed();
+    callback settings_changed();
+    callback hypr_prefs_changed();
+    callback studio_pick_image();
+    callback studio_select_role(string);
+    callback studio_set_hotspot(float, float);
+    callback studio_use_for_all();
+    callback studio_export();
+    callback open_themes_folder();
+    callback check_for_update();
+    callback open_support();
+    callback open_x();
+
+    function go(p: int) {
+        root.page = p;
+        root.page_changed(p);
+    }
+
+    property <string> page-title: root.page == 0 ? "Library"
+        : root.page == 1 ? "Import"
+        : root.page == 2 ? "Studio"
+        : root.page == 3 ? "About"
+        : root.page == 4 ? "Sign in"
+        : "Settings";
+    property <string> page-sub: root.page == 0 ? "Every pointer installed on this machine."
+        : root.page == 1 ? "Install a pack from an archive or a folder."
+        : root.page == 2 ? "Build an XCursor theme from PNG frames."
+        : root.page == 3 ? "What Mouse Me is, and where it lives on disk."
+        : root.page == 4 ? "Account sign-in will land here later."
+        : "Where the pointer is applied, and how it behaves.";
+
+    HorizontalLayout {
+        padding: 16px;
+        spacing: 14px;
+
+        // Floating sidebar
+        Rectangle {
+            width: 88px;
+            border-radius: 28px;
+            background: Ink.sidebar;
+            border-width: 1px;
+            border-color: Ink.stroke;
+
+            VerticalLayout {
+                width: 100%;
+                height: 100%;
+                padding-top: 16px;
+                padding-bottom: 14px;
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 10px;
+
+                HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 64px;
+                        height: 64px;
+                        border-radius: 20px;
+                        clip: true;
+                        background: Ink.parchment;
+
+                        Image {
+                            source: @image-url("../assets/mouse-me.png");
+                            width: 100%;
+                            height: 100%;
+                            image-fit: cover;
+                        }
+                    }
+                }
+
+                Display {
+                    text: "Mouse\nMe";
+                    font-size: 11px;
+                    font-weight: 700;
+                    color: Ink.parchment;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                Rectangle { height: 8px; background: transparent; }
+
+                NavBtn {
+                    icon: @image-url("../assets/icons/house.svg");
+                    label: "Library";
+                    active: root.page == 0;
+                    clicked => { root.go(0); }
+                }
+                NavBtn {
+                    icon: @image-url("../assets/icons/download-simple.svg");
+                    label: "Import";
+                    active: root.page == 1;
+                    clicked => { root.go(1); }
+                }
+                NavBtn {
+                    icon: @image-url("../assets/icons/avocado.svg");
+                    label: "Studio";
+                    active: root.page == 2;
+                    clicked => { root.go(2); }
+                }
+                NavBtn {
+                    icon: @image-url("../assets/icons/info.svg");
+                    label: "About";
+                    active: root.page == 3;
+                    clicked => { root.go(3); }
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: transparent;
+                }
+
+                NavBtn {
+                    icon: @image-url("../assets/icons/user.svg");
+                    label: "User";
+                    active: root.page == 4;
+                    clicked => { root.go(4); }
+                }
+                NavBtn {
+                    icon: @image-url("../assets/icons/gear.svg");
+                    label: "Settings";
+                    active: root.page == 5;
+                    clicked => { root.go(5); }
+                }
+            }
+        }
+
+        // Main stage
+        Rectangle {
+            border-radius: 28px;
+            background: Ink.panel;
+            border-width: 1px;
+            border-color: Ink.stroke;
+            clip: true;
+            horizontal-stretch: 1;
+
+            VerticalLayout {
+                width: 100%;
+                height: 100%;
+                padding: 22px;
+                spacing: 16px;
+
+                // Header
+                HorizontalLayout {
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        spacing: 4px;
+                        alignment: start;
+                        horizontal-stretch: 1;
+                        Display {
+                            text: root.page-title;
+                            font-size: 26px;
+                            font-weight: 700;
+                            color: Ink.ivory;
+                        }
+                        Text {
+                            text: root.page-sub;
+                            font-size: 13px;
+                            color: Ink.mist;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        FillBtn {
+                            label: "Refresh";
+                            quiet: true;
+                            with-icon: true;
+                            icon: @image-url("../assets/icons/arrow-clockwise.svg");
+                            busy: root.is_loading;
+                            clicked => { root.refresh_themes(); }
+                        }
+                    }
+                }
+
+                if root.page == 0: library := VerticalLayout {
+                    spacing: 14px;
+                    vertical-stretch: 1;
+
+                    HorizontalLayout {
+                        height: 36px;
+                        spacing: 8px;
+                        Field {
+                            width: 260px;
+                            placeholder: "Filter by name…";
+                            value: root.search_query;
+                            edited(t) => { root.search_changed(t); }
+                        }
+                        Chip { label: "All"; active: root.library_filter == "all"; clicked => { root.library_filter = "all"; root.filter_changed(); } }
+                        Chip { label: "User"; active: root.library_filter == "user"; clicked => { root.library_filter = "user"; root.filter_changed(); } }
+                        Chip { label: "System"; active: root.library_filter == "system"; clicked => { root.library_filter = "system"; root.filter_changed(); } }
+                        Rectangle { width: 8px; height: 36px; background: transparent; }
+                        Chip { label: "Any format"; active: root.library_type == "all"; clicked => { root.library_type = "all"; root.filter_changed(); } }
+                        Chip { label: "XCursor"; active: root.library_type == "xcursor"; clicked => { root.library_type = "xcursor"; root.filter_changed(); } }
+                        Chip { label: "Hyprcursor"; active: root.library_type == "hyprcursor"; clicked => { root.library_type = "hyprcursor"; root.filter_changed(); } }
+                        Rectangle { horizontal-stretch: 1; height: 36px; background: transparent; }
+                        Text {
+                            text: root.theme_count + " packs";
+                            font-size: 12px;
+                            color: Ink.mist;
+                            vertical-alignment: center;
+                            height: 100%;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        height: 36px;
+                        spacing: 6px;
+                        Text {
+                            text: "Size";
+                            font-size: 11px;
+                            color: Ink.mist;
+                            vertical-alignment: center;
+                            height: 100%;
+                        }
+                        SizePill { px: 16; active: root.active_size == 16; clicked => { root.size_changed(16); } }
+                        SizePill { px: 24; active: root.active_size == 24; clicked => { root.size_changed(24); } }
+                        SizePill { px: 32; active: root.active_size == 32; clicked => { root.size_changed(32); } }
+                        SizePill { px: 48; active: root.active_size == 48; clicked => { root.size_changed(48); } }
+                        SizePill { px: 64; active: root.active_size == 64; clicked => { root.size_changed(64); } }
+                    }
+
+                    if root.theme_count == 0: Rectangle {
+                        vertical-stretch: 1;
+                        border-radius: 20px;
+                        background: Ink.well;
+                        border-width: 1px;
+                        border-color: Ink.stroke;
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 10px;
+                            Display {
+                                text: "Nothing on the desk yet";
+                                font-size: 16px;
+                                font-weight: 700;
+                                color: Ink.ivory;
+                                horizontal-alignment: center;
+                            }
+                            Text {
+                                text: "Import a zip from the Import page, or cut a pointer in Studio.";
+                                font-size: 13px;
+                                color: Ink.mist;
+                                horizontal-alignment: center;
+                            }
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: 8px;
+                                FillBtn { label: "Import a pack"; clicked => { root.go(1); } }
+                                FillBtn { label: "Open Studio"; quiet: true; clicked => { root.go(2); } }
+                            }
+                        }
+                    }
+
+                    if root.theme_count > 0: ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            spacing: 10px;
+                            padding-right: 8px;
+
+                            for item in root.themes: Rectangle {
+                                height: 92px;
+                                border-radius: 18px;
+                                border-width: 1px;
+                                border-color: item.is_active ? Ink.sage : Ink.stroke;
+                                background: item.is_active ? #1E4F3428 : Ink.well;
+
+                                HorizontalLayout {
+                                    width: 100%;
+                                    height: 100%;
+                                    padding: 12px;
+                                    spacing: 14px;
+
+                                    Rectangle {
+                                        width: 176px;
+                                        vertical-stretch: 1;
+                                        border-radius: 14px;
+                                        background: Ink.parchment;
+                                        clip: true;
+
+                                        VerticalLayout {
+                                            width: 100%;
+                                            height: 100%;
+                                            alignment: center;
+
+                                            if item.has_preview: HorizontalLayout {
+                                                alignment: center;
+                                                spacing: 8px;
+                                                padding-left: 10px;
+                                                padding-right: 10px;
+                                                PreviewSlot { frame: item.preview_default; }
+                                                PreviewSlot { frame: item.preview_pointer; }
+                                                PreviewSlot { frame: item.preview_wait; }
+                                                PreviewSlot { frame: item.preview_text; }
+                                            }
+                                            if !item.has_preview: Text {
+                                                height: 32px;
+                                                text: "No preview";
+                                                font-size: 11px;
+                                                color: #5C6B52;
+                                                vertical-alignment: center;
+                                                horizontal-alignment: center;
+                                            }
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        spacing: 4px;
+                                        alignment: center;
+                                        horizontal-stretch: 1;
+                                        vertical-stretch: 1;
+
+                                        HorizontalLayout {
+                                            height: 20px;
+                                            spacing: 8px;
+                                            Display {
+                                                text: item.display_name;
+                                                font-size: 15px;
+                                                font-weight: 700;
+                                                color: Ink.ivory;
+                                                vertical-alignment: center;
+                                                height: 100%;
+                                            }
+                                            Rectangle {
+                                                height: 20px;
+                                                border-radius: 6px;
+                                                background: item.cursor_type == "Hyprcursor" ? #1E4F3455 : Ink.ghost;
+                                                HorizontalLayout {
+                                                    width: 100%;
+                                                    height: 100%;
+                                                    padding-left: 7px;
+                                                    padding-right: 7px;
+                                                    alignment: center;
+                                                    Text {
+                                                        text: item.cursor_type;
+                                                        font-size: 10px;
+                                                        font-weight: 700;
+                                                        color: item.cursor_type == "Hyprcursor" ? Ink.sage : Ink.fog;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+                                            }
+                                            if item.is_user: Rectangle {
+                                                height: 20px;
+                                                border-radius: 6px;
+                                                background: Ink.ghost;
+                                                HorizontalLayout {
+                                                    width: 100%;
+                                                    height: 100%;
+                                                    padding-left: 7px;
+                                                    padding-right: 7px;
+                                                    alignment: center;
+                                                    Text {
+                                                        text: "User";
+                                                        font-size: 10px;
+                                                        font-weight: 600;
+                                                        color: Ink.fog;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+                                            }
+                                            if item.is_active: Rectangle {
+                                                height: 20px;
+                                                border-radius: 6px;
+                                                background: #C9845A33;
+                                                HorizontalLayout {
+                                                    width: 100%;
+                                                    height: 100%;
+                                                    padding-left: 7px;
+                                                    padding-right: 7px;
+                                                    alignment: center;
+                                                    Text {
+                                                        text: "Live";
+                                                        font-size: 10px;
+                                                        font-weight: 700;
+                                                        color: Ink.click;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            text: item.comment != "" ? item.comment : item.path;
+                                            font-size: 11px;
+                                            color: Ink.mist;
+                                            overflow: elide;
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        vertical-stretch: 1;
+                                        HorizontalLayout {
+                                        spacing: 8px;
+
+                                        if item.is_deletable: FillBtn {
+                                            label: "Remove";
+                                            quiet: true;
+                                            danger: true;
+                                            clicked => { root.delete_theme(item.name); }
+                                        }
+
+                                        FillBtn {
+                                            label: item.is_active ? "Applied" : "Apply";
+                                            quiet: item.is_active;
+                                            clicked => {
+                                                if !item.is_active {
+                                                    root.apply_theme(item.name, root.active_size);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if root.page == 1: VerticalLayout {
+                    spacing: 16px;
+                    vertical-stretch: 1;
+
+                    drop_zone := DropArea {
+                        vertical-stretch: 1;
+                        min-height: 280px;
+                        can-drop(event) => {
+                            return DragAction.copy;
+                        }
+                        dropped(event) => {
+                            root.import_dropped(event.data);
+                            return DragAction.copy;
+                        }
+
+                        Rectangle {
+                            width: 100%;
+                            height: 100%;
+                            border-radius: 24px;
+                            border-width: 1.5px;
+                            border-color: drop_zone.has-drag ? Ink.sage : Ink.stroke-strong;
+                            background: drop_zone.has-drag ? #6B946822 : Ink.well;
+
+                            VerticalLayout {
+                                width: 100%;
+                                height: 100%;
+                                alignment: center;
+                                spacing: 12px;
+                                padding: 32px;
+
+                                HorizontalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 72px;
+                                        height: 72px;
+                                        border-radius: 22px;
+                                        clip: true;
+                                        background: Ink.parchment;
+                                        Image {
+                                            source: @image-url("../assets/mouse-me.png");
+                                            width: 100%;
+                                            height: 100%;
+                                            image-fit: cover;
+                                        }
+                                    }
+                                }
+
+                                Display {
+                                    text: drop_zone.has-drag ? "Release to install" : "Drop a cursor pack here";
+                                    font-size: 20px;
+                                    font-weight: 700;
+                                    color: Ink.ivory;
+                                    horizontal-alignment: center;
+                                }
+                                Text {
+                                    text: root.import_note;
+                                    font-size: 13px;
+                                    color: Ink.mist;
+                                    horizontal-alignment: center;
+                                    wrap: word-wrap;
+                                }
+
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 10px;
+                                    FillBtn {
+                                        label: "Browse archive";
+                                        clicked => { root.import_theme_dialog(); }
+                                    }
+                                    FillBtn {
+                                        label: "Browse folder";
+                                        quiet: true;
+                                        clicked => { root.import_folder_dialog(); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if root.page == 2: HorizontalLayout {
+                    spacing: 14px;
+                    vertical-stretch: 1;
+
+                    Rectangle {
+                        width: 200px;
+                        border-radius: 18px;
+                        background: Ink.well;
+                        border-width: 1px;
+                        border-color: Ink.stroke;
+
+                        VerticalLayout {
+                            width: 100%;
+                            height: 100%;
+                            padding: 12px;
+                            spacing: 6px;
+                            Display {
+                                text: "Roles";
+                                font-size: 11px;
+                                font-weight: 700;
+                                color: Ink.mist;
+                            }
+                            ScrollView {
+                                vertical-stretch: 1;
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    for role in root.studio_roles: Rectangle {
+                                        height: 34px;
+                                        border-radius: 10px;
+                                        background: role.id == root.studio_selected_role ? #1E4F3455 : (rtouch.has-hover ? Ink.ghost : #00000000);
+
+                                        HorizontalLayout {
+                                            width: 100%;
+                                            height: 100%;
+                                            padding-left: 10px;
+                                            padding-right: 10px;
+                                            spacing: 8px;
+                                            VerticalLayout {
+                                                alignment: center;
+                                                vertical-stretch: 1;
+                                                Rectangle {
+                                                    width: 7px;
+                                                    height: 7px;
+                                                    border-radius: 4px;
+                                                    background: role.assigned ? Ink.sage : Ink.stroke-strong;
+                                                }
+                                            }
+                                            Text {
+                                                text: role.label;
+                                                font-size: 12px;
+                                                font-weight: role.id == root.studio_selected_role ? 700 : 500;
+                                                color: Ink.ivory;
+                                                vertical-alignment: center;
+                                                horizontal-stretch: 1;
+                                                height: 100%;
+                                            }
+                                        }
+
+                                        rtouch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.studio_select_role(role.id); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 18px;
+                        background: Ink.well;
+                        border-width: 1px;
+                        border-color: Ink.stroke;
+
+                        studio_drop := DropArea {
+                            can-drop(event) => { return DragAction.copy; }
+                            dropped(event) => {
+                                root.studio_file_dropped(event.data);
+                                return DragAction.copy;
+                            }
+
+                            VerticalLayout {
+                                width: 100%;
+                                height: 100%;
+                                padding: 18px;
+                                spacing: 12px;
+
+                                Display {
+                                    text: "Hotspot canvas  ·  click to set the tip";
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    color: Ink.mist;
+                                }
+
+                                Rectangle {
+                                    vertical-stretch: 1;
+                                    border-radius: 16px;
+                                    background: Ink.parchment;
+                                    clip: true;
+
+                                    if root.studio_has_preview: Image {
+                                        source: root.studio_preview;
+                                        width: 100%;
+                                        height: 100%;
+                                        image-fit: contain;
+                                    }
+                                    if !root.studio_has_preview: VerticalLayout {
+                                        alignment: center;
+                                        spacing: 8px;
+                                        Display {
+                                            text: studio_drop.has-drag ? "Drop PNG onto this role" : "No frame on this role";
+                                            font-size: 14px;
+                                            font-weight: 700;
+                                            color: #4D5C46;
+                                            horizontal-alignment: center;
+                                        }
+                                        Text {
+                                            text: "Pick a PNG, or drop one here.";
+                                            font-size: 12px;
+                                            color: #6A7A62;
+                                            horizontal-alignment: center;
+                                        }
+                                    }
+
+                                    if root.studio_has_preview: Rectangle {
+                                        x: parent.width * root.studio_hotspot_x / max(1, root.studio_img_w) - 8px;
+                                        y: parent.height * root.studio_hotspot_y / max(1, root.studio_img_h) - 8px;
+                                        width: 16px;
+                                        height: 16px;
+                                        border-radius: 8px;
+                                        border-width: 2px;
+                                        border-color: Ink.click;
+                                        background: #C9845A55;
+                                    }
+
+                                    canvas_touch := TouchArea {
+                                        clicked => {
+                                            if root.studio_has_preview {
+                                                root.studio_set_hotspot(
+                                                    self.mouse-x / self.width,
+                                                    self.mouse-y / self.height
+                                                );
+                                            } else {
+                                                root.studio_pick_image();
+                                            }
+                                        }
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    height: 36px;
+                                    spacing: 8px;
+                                    FillBtn { label: "Choose PNG"; clicked => { root.studio_pick_image(); } }
+                                    FillBtn { label: "Use on every role"; quiet: true; clicked => { root.studio_use_for_all(); } }
+                                    Text {
+                                        text: "Hotspot  " + root.studio_hotspot_x + " × " + root.studio_hotspot_y;
+                                        font-size: 11px;
+                                        color: Ink.mist;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                        horizontal-alignment: right;
+                                        height: 100%;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 250px;
+                        border-radius: 18px;
+                        background: Ink.well;
+                        border-width: 1px;
+                        border-color: Ink.stroke;
+
+                        VerticalLayout {
+                            width: 100%;
+                            height: 100%;
+                            padding: 16px;
+                            spacing: 12px;
+
+                            Display { text: "Theme"; font-size: 11px; font-weight: 700; color: Ink.mist; }
+                            Field {
+                                placeholder: "Name";
+                                value <=> root.studio_name;
+                            }
+                            Field {
+                                placeholder: "Comment (optional)";
+                                value <=> root.studio_comment;
+                            }
+
+                            Display { text: "Nominal size"; font-size: 11px; font-weight: 700; color: Ink.mist; }
+                            HorizontalLayout {
+                                height: 36px;
+                                spacing: 6px;
+                                SizePill { px: 24; active: root.studio_size == 24; clicked => { root.studio_size = 24; } }
+                                SizePill { px: 32; active: root.studio_size == 32; clicked => { root.studio_size = 32; } }
+                                SizePill { px: 48; active: root.studio_size == 48; clicked => { root.studio_size = 48; } }
+                                SizePill { px: 64; active: root.studio_size == 64; clicked => { root.studio_size = 64; } }
+                            }
+
+                            Rectangle { vertical-stretch: 1; background: transparent; }
+
+                            Text {
+                                text: "Exports into ~/.local/share/icons as an XCursor pack, with aliases for GTK and X11.";
+                                font-size: 11px;
+                                color: Ink.mist;
+                                wrap: word-wrap;
+                            }
+                            FillBtn {
+                                label: "Export and install";
+                                clicked => { root.studio_export(); }
+                            }
+                        }
+                    }
+                }
+
+                if root.page == 3: VerticalLayout {
+                    spacing: 16px;
+                    vertical-stretch: 1;
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                        border-radius: 20px;
+                        background: Ink.well;
+                        border-width: 1px;
+                        border-color: Ink.stroke;
+
+                        VerticalLayout {
+                            width: 100%;
+                            height: 100%;
+                            alignment: center;
+                            spacing: 16px;
+                            padding: 36px;
+
+                            HorizontalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 88px;
+                                    height: 88px;
+                                    border-radius: 24px;
+                                    clip: true;
+                                    background: Ink.parchment;
+                                    Image {
+                                        source: @image-url("../assets/mouse-me.png");
+                                        width: 100%;
+                                        height: 100%;
+                                        image-fit: cover;
+                                    }
+                                }
+                            }
+
+                            Display {
+                                text: "Mouse Me";
+                                font-size: 22px;
+                                font-weight: 700;
+                                color: Ink.ivory;
+                                horizontal-alignment: center;
+                            }
+
+                            Text {
+                                text: "Mouse Me is a cursor manager I built for Linux desktops — Hyprland and Omarchy in particular — where the pointer still has to agree with GTK, Qt, and XWayland. It is a small app for a daily annoyance: keeping one theme in one place instead of five config files.";
+                                font-size: 13px;
+                                color: Ink.fog;
+                                horizontal-alignment: center;
+                                wrap: word-wrap;
+                            }
+                            Text {
+                                text: "Choose a pack in the library and apply it. Mouse Me writes the theme and size into the live session, desktop settings, and your user environment so the rest of the system follows. Import an archive or a folder, or assemble a simple XCursor theme in Studio.";
+                                font-size: 13px;
+                                color: Ink.fog;
+                                horizontal-alignment: center;
+                                wrap: word-wrap;
+                            }
+
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: 12px;
+                                Text {
+                                    text: "Version " + root.app_version;
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    color: Ink.parchment;
+                                    vertical-alignment: center;
+                                    height: 36px;
+                                }
+                                FillBtn {
+                                    label: "Check for updates";
+                                    quiet: true;
+                                    busy: root.checking_update;
+                                    clicked => { root.check_for_update(); }
+                                }
+                            }
+
+                            if root.update_note != "": Text {
+                                text: root.update_note;
+                                font-size: 12px;
+                                color: Ink.mist;
+                                horizontal-alignment: center;
+                                wrap: word-wrap;
+                            }
+
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: 10px;
+                                FillBtn {
+                                    label: "Buy me a coffee";
+                                    with-icon: true;
+                                    icon: @image-url("../assets/icons/coffee.svg");
+                                    clicked => { root.open_support(); }
+                                }
+                                FillBtn {
+                                    label: "Follow on X";
+                                    quiet: true;
+                                    with-icon: true;
+                                    icon: @image-url("../assets/icons/x-logo.svg");
+                                    clicked => { root.open_x(); }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if root.page == 4: VerticalLayout {
+                    spacing: 16px;
+                    vertical-stretch: 1;
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                        border-radius: 20px;
+                        background: Ink.well;
+                        border-width: 1px;
+                        border-color: Ink.stroke;
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 14px;
+                            padding: 32px;
+
+                            HorizontalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 72px;
+                                    height: 72px;
+                                    border-radius: 36px;
+                                    clip: true;
+                                    background: Ink.ghost;
+
+                                    Image {
+                                        x: 20px;
+                                        y: 20px;
+                                        width: 32px;
+                                        height: 32px;
+                                        source: @image-url("../assets/icons/user.svg");
+                                        image-fit: contain;
+                                        colorize: Ink.parchment;
+                                    }
+                                }
+                            }
+
+                            Display {
+                                text: "Sign in";
+                                font-size: 22px;
+                                font-weight: 700;
+                                color: Ink.ivory;
+                                horizontal-alignment: center;
+                            }
+                            Text {
+                                text: "Accounts are not wired up yet. This page is reserved for signing in and syncing your packs.";
+                                font-size: 13px;
+                                color: Ink.mist;
+                                horizontal-alignment: center;
+                                wrap: word-wrap;
+                            }
+                            HorizontalLayout {
+                                alignment: center;
+                                FillBtn {
+                                    label: "Coming later";
+                                    quiet: true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if root.page == 5: ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        spacing: 14px;
+                        padding-right: 8px;
+
+                        Rectangle {
+                            border-radius: 18px;
+                            background: Ink.well;
+                            border-width: 1px;
+                            border-color: Ink.stroke;
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 4px;
+                                Display { text: "Pointer size"; font-size: 11px; font-weight: 700; color: Ink.mist; }
+                                HorizontalLayout {
+                                    height: 36px;
+                                    spacing: 6px;
+                                    SizePill { px: 16; active: root.active_size == 16; clicked => { root.size_changed(16); } }
+                                    SizePill { px: 24; active: root.active_size == 24; clicked => { root.size_changed(24); } }
+                                    SizePill { px: 32; active: root.active_size == 32; clicked => { root.size_changed(32); } }
+                                    SizePill { px: 48; active: root.active_size == 48; clicked => { root.size_changed(48); } }
+                                    SizePill { px: 64; active: root.active_size == 64; clicked => { root.size_changed(64); } }
+                                }
+                                ToggleRow {
+                                    title: "Apply size immediately";
+                                    hint: "Changing a size pill writes it to the live session.";
+                                    checked <=> root.apply_size_immediately;
+                                    toggled => { root.settings_changed(); }
+                                }
+                                ToggleRow {
+                                    title: "Apply imported packs";
+                                    hint: "After a successful import, switch to the new theme.";
+                                    checked <=> root.auto_apply_on_import;
+                                    toggled => { root.settings_changed(); }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            border-radius: 18px;
+                            background: Ink.well;
+                            border-width: 1px;
+                            border-color: Ink.stroke;
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 2px;
+                                Display { text: "Where it writes"; font-size: 11px; font-weight: 700; color: Ink.mist; }
+                                ToggleRow { title: "Hyprland"; hint: "hyprctl setcursor for the live session."; checked <=> root.apply_hyprland; toggled => { root.settings_changed(); } }
+                                ToggleRow { title: "GSettings"; hint: "org.gnome.desktop.interface cursor theme and size."; checked <=> root.apply_gsettings; toggled => { root.settings_changed(); } }
+                                ToggleRow { title: "GTK 2/3/4 configs"; hint: "settings.ini and gtkrc-2.0."; checked <=> root.apply_gtk; toggled => { root.settings_changed(); } }
+                                ToggleRow { title: "Qt / KDE"; hint: "kdeglobals Mouse section."; checked <=> root.apply_qt; toggled => { root.settings_changed(); } }
+                                ToggleRow { title: "User environment"; hint: "environment.d with XCURSOR and HYPRCURSOR."; checked <=> root.apply_environment; toggled => { root.settings_changed(); } }
+                                ToggleRow { title: "X11 resources"; hint: ".Xresources and xrdb merge."; checked <=> root.apply_xresources; toggled => { root.settings_changed(); } }
+                                ToggleRow { title: "Default index.theme"; hint: "Inherits the chosen theme from ~/.icons/default."; checked <=> root.apply_default_index; toggled => { root.settings_changed(); } }
+                                ToggleRow { title: "Flatpak overrides"; hint: "Expose icon directories to sandboxed apps."; checked <=> root.apply_flatpak; toggled => { root.settings_changed(); } }
+                            }
+                        }
+
+                        Rectangle {
+                            border-radius: 18px;
+                            background: Ink.well;
+                            border-width: 1px;
+                            border-color: Ink.stroke;
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 2px;
+                                Display { text: "Hyprland cursor"; font-size: 11px; font-weight: 700; color: Ink.mist; }
+                                ToggleRow { title: "Enable Hyprcursor"; hint: "Prefer hyprcursor assets when a pack includes them."; checked <=> root.enable_hyprcursor; toggled => { root.hypr_prefs_changed(); } }
+                                ToggleRow { title: "Hide on key press"; hint: "Conceal the pointer while typing."; checked <=> root.hide_on_key_press; toggled => { root.hypr_prefs_changed(); } }
+                                ToggleRow { title: "Hide on touch"; hint: "Conceal the pointer during touch input."; checked <=> root.hide_on_touch; toggled => { root.hypr_prefs_changed(); } }
+                                ToggleRow { title: "No hardware cursors"; hint: "Force software rendering for the pointer."; checked <=> root.no_hardware_cursors; toggled => { root.hypr_prefs_changed(); } }
+                                HorizontalLayout {
+                                    padding-top: 8px;
+                                    padding-bottom: 8px;
+                                    spacing: 14px;
+                                    VerticalLayout {
+                                        spacing: 3px;
+                                        alignment: center;
+                                        horizontal-stretch: 1;
+                                        Display { text: "Inactive timeout"; font-size: 13px; font-weight: 600; color: Ink.ivory; }
+                                        Text { text: root.inactive_timeout == 0 ? "Stay visible" : root.inactive_timeout + " seconds until hide"; font-size: 11px; color: Ink.mist; }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        HorizontalLayout {
+                                            spacing: 6px;
+                                            Chip { label: "Off"; active: root.inactive_timeout == 0; clicked => { root.inactive_timeout = 0; root.hypr_prefs_changed(); } }
+                                            Chip { label: "3s"; active: root.inactive_timeout == 3; clicked => { root.inactive_timeout = 3; root.hypr_prefs_changed(); } }
+                                            Chip { label: "5s"; active: root.inactive_timeout == 5; clicked => { root.inactive_timeout = 5; root.hypr_prefs_changed(); } }
+                                            Chip { label: "10s"; active: root.inactive_timeout == 10; clicked => { root.inactive_timeout = 10; root.hypr_prefs_changed(); } }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            border-radius: 18px;
+                            background: Ink.well;
+                            border-width: 1px;
+                            border-color: Ink.stroke;
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 2px;
+                                Display { text: "Library"; font-size: 11px; font-weight: 700; color: Ink.mist; }
+                                ToggleRow { title: "Show user packs"; hint: "Themes installed under your home directory."; checked <=> root.show_user_themes; toggled => { root.filter_changed(); } }
+                                ToggleRow { title: "Show system packs"; hint: "Themes from /usr/share/icons and friends."; checked <=> root.show_system_themes; toggled => { root.filter_changed(); } }
+                            }
+                        }
+
+                    }
+                }
+
+            }
+        }
+    }
+}
