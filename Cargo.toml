@@ -3,6 +3,8 @@ name = "mouse-me"
 version = "0.1.0"
 edition = "2021"
 description = "Universal Linux & Omarchy cursor manager with modern Slint GUI & fast CLI"
+license = "GPL-3.0-or-later"
+authors = ["Grenish Rai <grenishrai@gmail.com>"]
 
 [dependencies]
 # GUI Framework

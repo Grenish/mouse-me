@@ -95,29 +95,6 @@ mouse-me remove MyCustomCursor
 
 ---
 
-## 🏗️ Architecture
-
-```
-mouse-me/
-├── Cargo.toml
-├── build.rs                 # Compiles Slint UI at build time
-├── mouse-me.desktop         # Desktop application launcher
-├── PKGBUILD                 # Arch Linux packaging recipe
-├── ui/
-│   └── main.slint           # Modern dark Slint UI declaration
-└── src/
-    ├── main.rs              # Entrypoint (dispatches CLI or GUI)
-    ├── cli.rs               # Clap CLI definitions & handlers
-    ├── gui.rs               # Slint window controller & state bindings
-    └── core/
-        ├── types.rs         # Data structures (Theme, Preview, Type)
-        ├── xcursor.rs       # Pure Rust XCursor binary parser
-        ├── scanner.rs       # Discovers installed cursors & active theme
-        ├── importer.rs      # Archive unpacker, flattener & normalizer
-        └── applier.rs       # Multi-subsystem synchronizer with per-target errors
-```
-
----
-
 ## 📄 License
-MIT / Apache-2.0
+
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0-or-later)**. See the [LICENSE](LICENSE) file for details.
