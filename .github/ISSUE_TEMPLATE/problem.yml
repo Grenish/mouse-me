@@ -1,0 +1,46 @@
+name: Problem
+description: Something in Mouse Me is broken or not working as expected
+title: "[Problem]: "
+labels: ["problem"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This repository is under active development and is not accepting pull requests.
+        Use this form if you ran into a problem while installing or using Mouse Me.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, and what went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Mouse Me version
+      description: Output of `mouse-me --version`, or the git commit if you built from source.
+      placeholder: 0.1.0
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Distro, desktop, and display server.
+      placeholder: Omarchy, Hyprland, Wayland
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Extra detail
+      description: Logs, screenshots, or anything else that helps.
+    validations:
+      required: false

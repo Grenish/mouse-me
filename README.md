@@ -8,6 +8,15 @@ A cursor manager for Linux desktops (Hyprland, Omarchy, GTK, Qt, and X11). It in
 
 ![Mouse Me](assets/screens/main.png)
 
+> [!IMPORTANT]
+> This repository is under active development and is not accepting pull requests. If you run into a problem, [open an issue](https://github.com/Grenish/mouse-me/issues/new?template=problem.yml).
+
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Grenish/mouse-me/main/install.sh | bash
+```
+
 ## Build
 
 ```bash
