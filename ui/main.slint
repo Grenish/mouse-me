@@ -4,6 +4,7 @@ import {
     Type,
     Display,
     NavBtn,
+    UserNav,
     Chip,
     Tag,
     SizePill,
@@ -12,6 +13,8 @@ import {
     FillBtn,
     Field,
     PreviewSlot,
+    MenuSelect,
+    DebugPill,
 } from "theme.slint";
 
 export struct ThemeItem {
@@ -79,6 +82,8 @@ export component MainWindow inherits Window {
     in-out property <bool> hide_on_touch: true;
     in-out property <bool> no_hardware_cursors: false;
     in-out property <int> inactive_timeout: 0;
+    in-out property <bool> auto_update: false;
+    in-out property <int> auto_update_when: 0;
 
     in-out property <string> studio_name: "Custom Pointer";
     in-out property <string> studio_comment: "";
@@ -94,15 +99,33 @@ export component MainWindow inherits Window {
     in-out property <string> import_note: "Drop a zip, tar.gz, tar.xz, or an unpacked theme folder.";
     in-out property <string> app_version: "0.1.0";
     in-out property <string> update_note: "";
+    in-out property <bool> update_available: false;
+    in-out property <string> update_tag: "";
 
     in-out property <bool> auth_signed_in: false;
     in-out property <bool> auth_creating: false;
     in-out property <bool> auth_busy: false;
+    in-out property <string> auth_name: "";
+    in-out property <string> auth_username: "";
     in-out property <string> auth_email: "";
     in-out property <string> auth_password: "";
     in-out property <string> auth_confirm: "";
     in-out property <string> auth_session_email: "";
+    in-out property <string> auth_session_name: "";
+    in-out property <string> auth_session_username: "";
+    in-out property <string> auth_joined: "";
+    in-out property <string> auth_published_label: "";
+    in-out property <image> auth_avatar;
+    in-out property <bool> auth_has_avatar: false;
     in-out property <string> auth_error: "";
+    in-out property <string> device_os: "";
+    in-out property <string> device_desktop: "";
+    in-out property <string> device_session: "";
+    in-out property <string> device_kernel: "";
+    in-out property <string> device_cursor: "";
+    in-out property <string> device_gtk: "";
+    in-out property <string> device_qt: "";
+    in-out property <string> device_env: "";
 
     callback apply_theme(string, int);
     callback import_theme_dialog();
@@ -124,12 +147,18 @@ export component MainWindow inherits Window {
     callback studio_export();
     callback open_themes_folder();
     callback check_for_update();
+    callback apply_update();
+    callback dismiss_update();
+    callback copy_device_info();
+    callback refresh_device_info();
     callback open_support();
     callback open_x();
     callback open_contribute();
     callback sign_in();
     callback create_account();
     callback sign_out();
+    callback open_forgot_password();
+    callback open_account_page();
 
     function go(p: int) {
         root.page = p;
@@ -148,14 +177,16 @@ export component MainWindow inherits Window {
         : root.page == 1 ? "Import"
         : root.page == 2 ? "Studio"
         : root.page == 3 ? "About"
-        : root.page == 4 ? (root.auth_signed_in ? "Account" : (root.auth_creating ? "Create account" : "Sign in"))
+        : root.page == 4 ? (root.auth_signed_in ? "Profile" : (root.auth_creating ? "Create account" : "Sign in"))
         : "Settings";
     property <string> page-sub: root.page == 0 ? "Every pointer installed on this machine."
         : root.page == 1 ? "Install a pack from an archive or a folder."
         : root.page == 2 ? "Build an XCursor theme from PNG frames."
         : root.page == 3 ? "What Mouse Me is, and where it lives on disk."
-        : root.page == 4 ? (root.auth_signed_in ? "You're signed in on this computer." : (root.auth_creating ? "Create an email and password for this computer." : "Sign in with your email and password."))
+        : root.page == 4 ? (root.auth_signed_in ? (root.auth_session_username != "" ? "@" + root.auth_session_username : "Your Mouse Me account.") : (root.auth_creating ? "This is the same account as the Mouse Me website." : "Use the email and password from the Mouse Me website."))
         : "Where the pointer is applied, and how it behaves.";
+    property <string> sidebar-user-label: !root.auth_signed_in ? "User"
+        : (root.auth_session_name != "" ? root.auth_session_name : (root.auth_session_username != "" ? root.auth_session_username : "User"));
 
     HorizontalLayout {
         padding: 16px;
@@ -243,9 +274,12 @@ export component MainWindow inherits Window {
                     background: transparent;
                 }
 
-                NavBtn {
+                UserNav {
                     icon: @image-url("../assets/icons/user.svg");
-                    label: root.auth_signed_in ? "Account" : "User";
+                    label: root.sidebar-user-label;
+                    signed-in: root.auth_signed_in;
+                    has-photo: root.auth_has_avatar;
+                    photo: root.auth_avatar;
                     active: root.page == 4;
                     clicked => { root.go(4); }
                 }
@@ -969,106 +1003,258 @@ export component MainWindow inherits Window {
                         border-width: 1px;
                         border-color: Ink.stroke;
 
-                        VerticalLayout {
-                            width: 100%;
-                            height: 100%;
-                            alignment: center;
-                            spacing: 16px;
-                            padding: 36px;
+                        ScrollView {
+                            VerticalLayout {
+                                alignment: start;
+                                spacing: 28px;
+                                padding: 32px;
 
-                            HorizontalLayout {
-                                alignment: center;
-                                Rectangle {
-                                    width: 88px;
-                                    height: 88px;
-                                    border-radius: 24px;
-                                    clip: true;
-                                    background: Ink.parchment;
-                                    Image {
-                                        source: @image-url("../assets/mouse-me.png");
-                                        width: 100%;
-                                        height: 100%;
-                                        image-fit: cover;
+                                // --- HERO SECTION ---
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 16px;
+
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            width: 80px;
+                                            height: 80px;
+                                            border-radius: 22px;
+                                            clip: true;
+                                            background: Ink.parchment;
+                                            Image {
+                                                source: @image-url("../assets/mouse-me.png");
+                                                width: 100%;
+                                                height: 100%;
+                                                image-fit: cover;
+                                            }
+                                        }
+                                    }
+
+                                    Display {
+                                        text: "Mouse Me";
+                                        font-size: 22px;
+                                        font-weight: 700;
+                                        color: Ink.ivory;
+                                        horizontal-alignment: center;
+                                    }
+
+                                    Text {
+                                        text: "Mouse Me is a cursor manager built for Linux desktops — Hyprland and Omarchy in particular — where the pointer still has to agree with GTK, Qt, and XWayland. It is a small app for a daily annoyance: keeping one theme in one place instead of five config files.";
+                                        font-size: 13px;
+                                        color: Ink.fog;
+                                        horizontal-alignment: center;
+                                        wrap: word-wrap;
+                                    }
+
+                                    Text {
+                                        text: "Choose a pack in the library and apply it. Mouse Me writes the theme and size into the live session, desktop settings, and your user environment so the rest of the system follows. Import an archive or a folder, or assemble a simple XCursor theme in Studio.";
+                                        font-size: 13px;
+                                        color: Ink.fog;
+                                        horizontal-alignment: center;
+                                        wrap: word-wrap;
+                                    }
+
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 12px;
+                                        Text {
+                                            text: "Version " + root.app_version;
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            color: Ink.parchment;
+                                            vertical-alignment: center;
+                                            height: 36px;
+                                        }
+
+                                        FillBtn {
+                                            label: "Check for updates";
+                                            quiet: true;
+                                            busy: root.checking_update;
+                                            clicked => { root.check_for_update(); }
+                                        }
+                                    }
+
+                                    if root.update_available: VerticalLayout {
+                                        spacing: 12px;
+                                        Text {
+                                            text: root.update_tag + " is available. Update Mouse Me on this computer?";
+                                            font-size: 13px;
+                                            color: Ink.ivory;
+                                            horizontal-alignment: center;
+                                            wrap: word-wrap;
+                                        }
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 10px;
+                                            FillBtn {
+                                                label: "Update now";
+                                                busy: root.checking_update;
+                                                clicked => { root.apply_update(); }
+                                            }
+                                            FillBtn {
+                                                label: "Not now";
+                                                quiet: true;
+                                                clicked => { root.dismiss_update(); }
+                                            }
+                                        }
+                                    }
+
+                                    if root.update_note != "": Text {
+                                        text: root.update_note;
+                                        font-size: 12px;
+                                        color: Ink.mist;
+                                        horizontal-alignment: center;
+                                        wrap: word-wrap;
+                                    }
+
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 10px;
+                                        FillBtn {
+                                            label: "Buy me a coffee";
+                                            with-icon: true;
+                                            icon: @image-url("../assets/icons/coffee.svg");
+                                            clicked => { root.open_support(); }
+                                        }
+
+                                        FillBtn {
+                                            label: "Follow on X";
+                                            quiet: true;
+                                            with-icon: true;
+                                            icon: @image-url("../assets/icons/x-logo.svg");
+                                            clicked => { root.open_x(); }
+                                        }
+
+                                        FillBtn {
+                                            label: "Contribute";
+                                            quiet: true;
+                                            with-icon: true;
+                                            icon: @image-url("../assets/icons/github-logo.svg");
+                                            clicked => { root.open_contribute(); }
+                                        }
                                     }
                                 }
-                            }
 
-                            Display {
-                                text: "Mouse Me";
-                                font-size: 22px;
-                                font-weight: 700;
-                                color: Ink.ivory;
-                                horizontal-alignment: center;
-                            }
-
-                            Text {
-                                text: "Mouse Me is a cursor manager I built for Linux desktops — Hyprland and Omarchy in particular — where the pointer still has to agree with GTK, Qt, and XWayland. It is a small app for a daily annoyance: keeping one theme in one place instead of five config files.";
-                                font-size: 13px;
-                                color: Ink.fog;
-                                horizontal-alignment: center;
-                                wrap: word-wrap;
-                            }
-
-                            Text {
-                                text: "Choose a pack in the library and apply it. Mouse Me writes the theme and size into the live session, desktop settings, and your user environment so the rest of the system follows. Import an archive or a folder, or assemble a simple XCursor theme in Studio.";
-                                font-size: 13px;
-                                color: Ink.fog;
-                                horizontal-alignment: center;
-                                wrap: word-wrap;
-                            }
-
-                            HorizontalLayout {
-                                alignment: center;
-                                spacing: 12px;
-                                Text {
-                                    text: "Version " + root.app_version;
-                                    font-size: 13px;
-                                    font-weight: 600;
-                                    color: Ink.parchment;
-                                    vertical-alignment: center;
-                                    height: 36px;
+                                // --- DIVIDER ---
+                                Rectangle {
+                                    height: 1px;
+                                    background: Ink.stroke;
                                 }
 
-                                FillBtn {
-                                    label: "Check for updates";
-                                    quiet: true;
-                                    busy: root.checking_update;
-                                    clicked => { root.check_for_update(); }
-                                }
-                            }
+                                // --- DEVICE & SYSTEM INFO SECTION ---
+                                VerticalLayout {
+                                    spacing: 14px;
 
-                            if root.update_note != "": Text {
-                                text: root.update_note;
-                                font-size: 12px;
-                                color: Ink.mist;
-                                horizontal-alignment: center;
-                                wrap: word-wrap;
-                            }
+                                    HorizontalLayout {
+                                        alignment: space-between;
+                                        spacing: 12px;
 
-                            HorizontalLayout {
-                                alignment: center;
-                                spacing: 10px;
-                                FillBtn {
-                                    label: "Buy me a coffee";
-                                    with-icon: true;
-                                    icon: @image-url("../assets/icons/coffee.svg");
-                                    clicked => { root.open_support(); }
-                                }
+                                        VerticalLayout {
+                                            spacing: 2px;
+                                            alignment: center;
+                                            Display {
+                                                text: "Device & System Diagnostics";
+                                                font-size: 15px;
+                                                font-weight: 700;
+                                                color: Ink.ivory;
+                                            }
+                                            Text {
+                                                text: "Hardware and environment details helpful for debugging cursor issues.";
+                                                font-size: 12px;
+                                                color: Ink.mist;
+                                            }
+                                        }
 
-                                FillBtn {
-                                    label: "Follow on X";
-                                    quiet: true;
-                                    with-icon: true;
-                                    icon: @image-url("../assets/icons/x-logo.svg");
-                                    clicked => { root.open_x(); }
-                                }
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            alignment: end;
 
-                                FillBtn {
-                                    label: "Contribute";
-                                    quiet: true;
-                                    with-icon: true;
-                                    icon: @image-url("../assets/icons/github-logo.svg");
-                                    clicked => { root.open_contribute(); }
+                                            FillBtn {
+                                                label: "Refresh info";
+                                                quiet: true;
+                                                with-icon: true;
+                                                icon: @image-url("../assets/icons/arrow-clockwise.svg");
+                                                clicked => { root.refresh_device_info(); }
+                                            }
+
+                                            FillBtn {
+                                                label: "Copy debug info";
+                                                with-icon: true;
+                                                icon: @image-url("../assets/icons/info.svg");
+                                                clicked => { root.copy_device_info(); }
+                                            }
+                                        }
+                                    }
+
+                                    // Info Grid Box
+                                    Rectangle {
+                                        border-radius: 16px;
+                                        background: Ink.panel;
+                                        border-width: 1px;
+                                        border-color: Ink.stroke;
+
+                                        VerticalLayout {
+                                            padding: 16px;
+                                            spacing: 10px;
+
+                                            HorizontalLayout {
+                                                spacing: 12px;
+                                                DebugPill {
+                                                    title: "OS / DISTRIBUTION";
+                                                    value: root.device_os;
+                                                    horizontal-stretch: 1;
+                                                }
+                                                DebugPill {
+                                                    title: "DESKTOP / COMPOSITOR";
+                                                    value: root.device_desktop;
+                                                    horizontal-stretch: 1;
+                                                }
+                                            }
+
+                                            HorizontalLayout {
+                                                spacing: 12px;
+                                                DebugPill {
+                                                    title: "SESSION & DISPLAY";
+                                                    value: root.device_session;
+                                                    horizontal-stretch: 1;
+                                                }
+                                                DebugPill {
+                                                    title: "KERNEL & ARCH";
+                                                    value: root.device_kernel;
+                                                    horizontal-stretch: 1;
+                                                }
+                                            }
+
+                                            HorizontalLayout {
+                                                spacing: 12px;
+                                                DebugPill {
+                                                    title: "ACTIVE CURSOR THEME";
+                                                    value: root.device_cursor;
+                                                    horizontal-stretch: 1;
+                                                }
+                                                DebugPill {
+                                                    title: "GTK / GSETTINGS";
+                                                    value: root.device_gtk;
+                                                    horizontal-stretch: 1;
+                                                }
+                                            }
+
+                                            HorizontalLayout {
+                                                spacing: 12px;
+                                                DebugPill {
+                                                    title: "QT / KDE THEME";
+                                                    value: root.device_qt;
+                                                    horizontal-stretch: 1;
+                                                }
+                                                DebugPill {
+                                                    title: "ENVIRONMENT VARIABLES";
+                                                    value: root.device_env;
+                                                    horizontal-stretch: 1;
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1086,6 +1272,7 @@ export component MainWindow inherits Window {
                         border-width: 1px;
                         border-color: Ink.stroke;
 
+                        ScrollView {
                         VerticalLayout {
                             alignment: center;
                             padding: 32px;
@@ -1099,15 +1286,21 @@ export component MainWindow inherits Window {
                                     HorizontalLayout {
                                         alignment: center;
                                         Rectangle {
-                                            width: 72px;
-                                            height: 72px;
-                                            border-radius: 36px;
+                                            width: 88px;
+                                            height: 88px;
+                                            border-radius: 44px;
                                             clip: true;
                                             background: Ink.ghost;
 
-                                            Image {
-                                                x: 20px;
-                                                y: 20px;
+                                            if root.auth_signed_in && root.auth_has_avatar: Image {
+                                                width: 100%;
+                                                height: 100%;
+                                                source: root.auth_avatar;
+                                                image-fit: cover;
+                                            }
+                                            if !(root.auth_signed_in && root.auth_has_avatar): Image {
+                                                x: 28px;
+                                                y: 28px;
                                                 width: 32px;
                                                 height: 32px;
                                                 source: @image-url("../assets/icons/user.svg");
@@ -1121,19 +1314,66 @@ export component MainWindow inherits Window {
                                         spacing: 16px;
 
                                         Display {
-                                            text: root.auth_session_email;
-                                            font-size: 16px;
+                                            text: root.auth_session_name != "" ? root.auth_session_name : root.auth_session_email;
+                                            font-size: 18px;
                                             font-weight: 700;
                                             color: Ink.ivory;
                                             horizontal-alignment: center;
                                         }
 
-                                        Text {
-                                            text: "Packs still live only on this machine. Cloud sync is not wired up yet.";
+                                        if root.auth_session_username != "": Text {
+                                            text: "@" + root.auth_session_username;
                                             font-size: 13px;
-                                            color: Ink.mist;
+                                            color: Ink.parchment;
                                             horizontal-alignment: center;
-                                            wrap: word-wrap;
+                                        }
+
+                                        HorizontalLayout {
+                                            spacing: 10px;
+
+                                            Rectangle {
+                                                horizontal-stretch: 1;
+                                                border-radius: 14px;
+                                                background: Ink.ghost;
+                                                VerticalLayout {
+                                                    padding: 14px;
+                                                    spacing: 4px;
+                                                    Display {
+                                                        text: "Joined";
+                                                        font-size: 11px;
+                                                        font-weight: 700;
+                                                        color: Ink.mist;
+                                                    }
+                                                    Display {
+                                                        text: root.auth_joined != "" ? root.auth_joined : "—";
+                                                        font-size: 14px;
+                                                        font-weight: 700;
+                                                        color: Ink.ivory;
+                                                    }
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                horizontal-stretch: 1;
+                                                border-radius: 14px;
+                                                background: Ink.ghost;
+                                                VerticalLayout {
+                                                    padding: 14px;
+                                                    spacing: 4px;
+                                                    Display {
+                                                        text: "On the web";
+                                                        font-size: 11px;
+                                                        font-weight: 700;
+                                                        color: Ink.mist;
+                                                    }
+                                                    Display {
+                                                        text: root.auth_published_label != "" ? root.auth_published_label : "None yet";
+                                                        font-size: 14px;
+                                                        font-weight: 700;
+                                                        color: Ink.ivory;
+                                                    }
+                                                }
+                                            }
                                         }
 
                                         FillBtn {
@@ -1145,6 +1385,36 @@ export component MainWindow inherits Window {
 
                                     if !root.auth_signed_in: VerticalLayout {
                                         spacing: 14px;
+
+                                        if root.auth_creating: VerticalLayout {
+                                            spacing: 4px;
+                                            Display {
+                                                text: "Name";
+                                                font-size: 11px;
+                                                font-weight: 700;
+                                                color: Ink.mist;
+                                            }
+                                            Field {
+                                                placeholder: "Your name";
+                                                value <=> root.auth_name;
+                                                accepted => { root.submit-auth(); }
+                                            }
+                                        }
+
+                                        if root.auth_creating: VerticalLayout {
+                                            spacing: 4px;
+                                            Display {
+                                                text: "Username";
+                                                font-size: 11px;
+                                                font-weight: 700;
+                                                color: Ink.mist;
+                                            }
+                                            Field {
+                                                placeholder: "your-name";
+                                                value <=> root.auth_username;
+                                                accepted => { root.submit-auth(); }
+                                            }
+                                        }
 
                                         VerticalLayout {
                                             spacing: 4px;
@@ -1206,6 +1476,21 @@ export component MainWindow inherits Window {
                                             clicked => { root.submit-auth(); }
                                         }
 
+                                        if !root.auth_creating: HorizontalLayout {
+                                            alignment: center;
+                                            forgot := TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.open_forgot_password(); }
+                                                Text {
+                                                    text: "Forgot password?";
+                                                    font-size: 12px;
+                                                    font-weight: 700;
+                                                    color: forgot.has-hover ? Ink.ivory : Ink.parchment;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                        }
+
                                         HorizontalLayout {
                                             alignment: center;
                                             spacing: 6px;
@@ -1235,6 +1520,7 @@ export component MainWindow inherits Window {
                                 }
                             }
                         }
+                        }
                     }
                 }
 
@@ -1243,6 +1529,65 @@ export component MainWindow inherits Window {
                     VerticalLayout {
                         spacing: 14px;
                         padding-right: 8px;
+
+                        Rectangle {
+                            border-radius: 18px;
+                            background: Ink.well;
+                            border-width: 1px;
+                            border-color: Ink.stroke;
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 4px;
+                                Display {
+                                    text: "Mouse Me";
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    color: Ink.mist;
+                                }
+
+                                ToggleRow {
+                                    title: "Auto-update";
+                                    hint: "When a new release is published, install it according to the permission below.";
+                                    checked <=> root.auto_update;
+                                    toggled => { root.settings_changed(); }
+                                }
+
+                                HorizontalLayout {
+                                    padding-top: 8px;
+                                    padding-bottom: 8px;
+                                    spacing: 16px;
+                                    VerticalLayout {
+                                        spacing: 3px;
+                                        alignment: center;
+                                        horizontal-stretch: 1;
+                                        Display {
+                                            text: "When to install";
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            color: root.auto_update ? Ink.ivory : Ink.mist;
+                                        }
+                                        Text {
+                                            text: root.auto_update_when == 2 ? "Install as soon as an update is found, then restart."
+                                                : (root.auto_update_when == 1 ? "Download and install quietly. Restart to start using it."
+                                                : "Download now, install the next time you open Mouse Me.");
+                                            font-size: 11px;
+                                            color: Ink.mist;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        width: 200px;
+                                        MenuSelect {
+                                            selected <=> root.auto_update_when;
+                                            enabled: root.auto_update;
+                                            choices: ["On next launch", "In the background", "Instantly"];
+                                            changed => { root.settings_changed(); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         Rectangle {
                             border-radius: 18px;
