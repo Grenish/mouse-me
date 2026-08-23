@@ -4,13 +4,31 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "assets/**"
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "assets/**"
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
   check:
@@ -42,6 +60,11 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
+
+      - name: Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "mouse-me-build"
 
       - name: Check formatting
         run: cargo fmt --all -- --check

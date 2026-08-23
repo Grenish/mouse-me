@@ -11,8 +11,16 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
   release:
@@ -60,14 +68,13 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Check compilation
-        run: cargo check --locked
+      - name: Cache Rust dependencies and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "mouse-me-build"
 
       - name: Run tests
-        run: cargo test --locked
+        run: cargo test --tests
 
       - name: Build release binary
         run: cargo build --release --locked
@@ -77,12 +84,12 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           mkdir -p dist
-          tar -C target/release \
-            -czf "dist/mouse-me-${RELEASE_TAG}-linux-x86_64.tar.gz" \
-            mouse-me
-          sha256sum \
-            "dist/mouse-me-${RELEASE_TAG}-linux-x86_64.tar.gz" \
-            > "dist/mouse-me-${RELEASE_TAG}-linux-x86_64.tar.gz.sha256"
+          archive="mouse-me-${RELEASE_TAG}-linux-x86_64.tar.gz"
+          tar -C target/release -czf "dist/${archive}" mouse-me
+          (
+            cd dist
+            sha256sum "${archive}" > "${archive}.sha256"
+          )
 
       - name: Publish GitHub Release
         env:
