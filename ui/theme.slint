@@ -79,6 +79,68 @@ export component NavBtn inherits Rectangle {
     }
 }
 
+export component UserNav inherits Rectangle {
+    in property <bool> active;
+    in property <bool> signed-in;
+    in property <bool> has-photo;
+    in property <string> label;
+    in property <image> icon;
+    in property <image> photo;
+    callback clicked;
+
+    width: 64px;
+    height: root.signed-in ? 64px : 56px;
+    border-radius: 16px;
+    background: root.active ? #1E4F3455 : (touch.has-hover ? Ink.ghost-hover : #00000000);
+
+    VerticalLayout {
+        width: 100%;
+        height: 100%;
+        alignment: center;
+        spacing: 5px;
+
+        HorizontalLayout {
+            alignment: center;
+            if root.signed-in && root.has-photo: Rectangle {
+                width: 32px;
+                height: 32px;
+                border-radius: 16px;
+                clip: true;
+                background: Ink.ghost;
+                Image {
+                    width: 100%;
+                    height: 100%;
+                    source: root.photo;
+                    image-fit: cover;
+                }
+            }
+            if !(root.signed-in && root.has-photo): Image {
+                source: root.icon;
+                width: 20px;
+                height: 20px;
+                image-fit: contain;
+                colorize: root.active ? Ink.parchment : (touch.has-hover ? Ink.ivory : Ink.fog);
+            }
+        }
+
+        Display {
+            width: 56px;
+            text: root.label;
+            font-size: 10px;
+            font-weight: root.active ? 700 : 500;
+            color: root.active ? Ink.parchment : Ink.mist;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
 export component Chip inherits Rectangle {
     in property <string> label;
     in property <bool> active;
@@ -240,6 +302,88 @@ export component ToggleRow inherits Rectangle {
     }
 }
 
+export component MenuSelect inherits Rectangle {
+    in-out property <int> selected: 0;
+    in property <[string]> choices: [];
+    in property <bool> enabled: true;
+    in-out property <bool> open: false;
+    callback changed;
+
+    vertical-stretch: 0;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: root.open && root.enabled ? Ink.sage : Ink.stroke;
+    background: Ink.well;
+    opacity: root.enabled ? 1 : 0.55;
+    clip: true;
+
+    VerticalLayout {
+        spacing: 0px;
+
+        Rectangle {
+            height: 36px;
+            HorizontalLayout {
+                width: 100%;
+                height: 100%;
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 8px;
+                Text {
+                    text: root.choices.length > 0 && root.selected >= 0 && root.selected < root.choices.length ? root.choices[root.selected] : "";
+                    font-size: 13px;
+                    color: Ink.ivory;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                Text {
+                    text: root.open && root.enabled ? "▴" : "▾";
+                    font-size: 11px;
+                    color: Ink.mist;
+                    vertical-alignment: center;
+                }
+            }
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    if root.enabled {
+                        root.open = !root.open;
+                    }
+                }
+            }
+        }
+
+        if root.open && root.enabled: VerticalLayout {
+            padding: 4px;
+            spacing: 2px;
+            for choice[index] in root.choices: Rectangle {
+                height: 32px;
+                border-radius: 8px;
+                background: index == root.selected ? Ink.ghost : (row.has-hover ? Ink.ghost-hover : #00000000);
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    Text {
+                        text: choice;
+                        font-size: 12px;
+                        font-weight: index == root.selected ? 700 : 500;
+                        color: index == root.selected ? Ink.parchment : Ink.fog;
+                        vertical-alignment: center;
+                    }
+                }
+                row := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.selected = index;
+                        root.open = false;
+                        root.changed();
+                    }
+                }
+            }
+        }
+    }
+}
+
 export component FillBtn inherits Rectangle {
     in property <string> label;
     in property <bool> quiet: false;
@@ -384,6 +528,46 @@ export component Field inherits Rectangle {
             color: reveal.has-hover ? Ink.ivory : Ink.mist;
             vertical-alignment: center;
             horizontal-alignment: center;
+        }
+    }
+}
+
+export component DebugPill inherits Rectangle {
+    in property <string> title;
+    in property <string> value;
+
+    border-radius: 10px;
+    background: Ink.well;
+    border-width: 1px;
+    border-color: Ink.stroke;
+    min-height: 52px;
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        alignment: space-between;
+
+        VerticalLayout {
+            spacing: 3px;
+            alignment: center;
+            horizontal-stretch: 1;
+
+            Text {
+                text: root.title;
+                font-size: 10px;
+                font-weight: 600;
+                color: Ink.mist;
+            }
+
+            Text {
+                text: root.value != "" ? root.value : "—";
+                font-size: 12px;
+                font-weight: 600;
+                color: Ink.ivory;
+                overflow: elide;
+            }
         }
     }
 }
