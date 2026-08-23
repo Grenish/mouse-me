@@ -12,6 +12,8 @@ fn defaults_are_safe_for_first_launch() {
     assert_eq!(settings.preferred_size, 24);
     assert_eq!(settings.last_page, 0);
     assert_eq!(settings.inactive_timeout, 0);
+    assert!(!settings.auto_update);
+    assert_eq!(settings.auto_update_when, "next-launch");
 }
 
 #[test]
@@ -47,4 +49,18 @@ fn settings_json_roundtrip_keeps_custom_values() {
 fn invalid_json_falls_back_to_defaults() {
     let settings: AppSettings = serde_json::from_str("not-json").unwrap_or_default();
     assert_eq!(settings.preferred_size, 24);
+}
+
+#[test]
+fn missing_auto_update_fields_keep_other_settings() {
+    let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+    let object = value.as_object_mut().unwrap();
+    object.remove("auto_update");
+    object.remove("auto_update_when");
+    object.insert("apply_hyprland".into(), serde_json::json!(false));
+    let restored: AppSettings = serde_json::from_value(value).unwrap();
+    assert!(!restored.auto_update);
+    assert_eq!(restored.auto_update_when, "next-launch");
+    assert!(!restored.apply_hyprland);
+    assert!(restored.apply_gtk);
 }

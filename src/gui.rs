@@ -7,11 +7,14 @@ use std::rc::Rc;
 use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
 use mouse_me::core::applier::{apply_hypr_cursor_prefs, apply_with_targets};
+use mouse_me::core::auth::{decode_avatar, format_joined, format_published, AuthStore, AuthUser};
+use mouse_me::core::device_info::{collect_device_info, copy_to_clipboard};
 use mouse_me::core::importer::{import_cursor_pack, is_safe_theme_name};
 use mouse_me::core::scanner::{get_active_cursor, scan_cursor_themes};
 use mouse_me::core::settings::AppSettings;
 use mouse_me::core::studio::{export_theme, load_png_as_cursor, STUDIO_ROLES};
 use mouse_me::core::types::CursorImage;
+use mouse_me::core::updater::{self, Release};
 
 slint::include_modules!();
 
@@ -22,6 +25,10 @@ const LIBRARY_CARD_HEIGHT: f32 = 92.0;
 const LIBRARY_CARD_GAP: f32 = 10.0;
 
 pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
+    if let Err(error) = updater::apply_pending_update() {
+        eprintln!("mouse-me: pending update failed: {error}");
+    }
+
     let main_window = MainWindow::new()?;
     let window_handle = main_window.as_weak();
     let studio_images: Rc<RefCell<HashMap<String, CursorImage>>> =
@@ -31,8 +38,11 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     let settings = AppSettings::load();
     apply_settings_to_window(&main_window, &settings);
     main_window.set_app_version(SharedString::from(env!("CARGO_PKG_VERSION")));
+    apply_saved_session(&main_window);
     refresh_studio_roles(&main_window, &studio_images.borrow());
     refresh_ui_state(&main_window);
+    refresh_device_info_state(&main_window);
+    start_auto_update(&main_window);
 
     {
         let wh = window_handle.clone();
@@ -258,6 +268,12 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         format!("Could not save page preference: {}", error),
                     );
                 }
+                if page == 3 {
+                    refresh_device_info_state(&w);
+                }
+                if page == 4 && w.get_auth_signed_in() {
+                    refresh_profile(&w);
+                }
             }
         });
     }
@@ -447,54 +463,33 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         let wh = window_handle.clone();
         main_window.on_check_for_update(move || {
             let Some(w) = wh.upgrade() else { return };
-            if w.get_checking_update() {
+            check_for_update(&w, true);
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_apply_update(move || {
+            let Some(w) = wh.upgrade() else { return };
+            let tag = w.get_update_tag().to_string();
+            if tag.is_empty() || w.get_checking_update() {
                 return;
             }
-            w.set_checking_update(true);
-            w.set_update_note(SharedString::from("Checking GitHub…"));
-            let current = env!("CARGO_PKG_VERSION").to_string();
-            let wh2 = wh.clone();
-            std::thread::spawn(move || {
-                let result = latest_release_tag();
-                let _ = slint::invoke_from_event_loop(move || {
-                    let Some(w) = wh2.upgrade() else { return };
-                    w.set_checking_update(false);
-                    match result {
-                        Ok(tag) => {
-                            let latest = tag.trim_start_matches('v');
-                            if version_cmp(latest, &current) == std::cmp::Ordering::Greater {
-                                if open_url("https://github.com/Grenish/mouse-me/releases/latest") {
-                                    w.set_update_note(SharedString::from(format!(
-                                        "{} is available. Opening the release page.",
-                                        tag
-                                    )));
-                                } else {
-                                    w.set_update_note(SharedString::from(format!(
-                                        "{} is available, but the release page could not be opened.",
-                                        tag
-                                    )));
-                                }
-                            } else {
-                                w.set_update_note(SharedString::from(format!(
-                                    "You're on {}. That's the latest published build.",
-                                    current
-                                )));
-                            }
-                        }
-                        Err(kind) if kind == "no-release" => {
-                            w.set_update_note(SharedString::from(format!(
-                                "You're on {}. No newer release has been published yet.",
-                                current
-                            )));
-                        }
-                        Err(_) => {
-                            w.set_update_note(SharedString::from(
-                                "Couldn't reach GitHub. Check the connection and try again.",
-                            ));
-                        }
-                    }
-                });
-            });
+            apply_release_now(&w, tag, true);
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_dismiss_update(move || {
+            let Some(w) = wh.upgrade() else { return };
+            let tag = w.get_update_tag().to_string();
+            w.set_update_available(false);
+            if tag.is_empty() {
+                w.set_update_note(SharedString::from(""));
+            } else {
+                w.set_update_note(SharedString::from(format!("We'll leave {tag} for later.")));
+            }
         });
     }
 
@@ -534,8 +529,226 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    {
+        let wh = window_handle.clone();
+        main_window.on_copy_device_info(move || {
+            let Some(w) = wh.upgrade() else { return };
+            let info = collect_device_info();
+            match copy_to_clipboard(&info.full_report) {
+                Ok(()) => {
+                    set_status(&w, false, "Copied device & debug info to clipboard.".into());
+                }
+                Err(error) => {
+                    set_status(&w, true, format!("Could not copy to clipboard: {}", error));
+                }
+            }
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_refresh_device_info(move || {
+            let Some(w) = wh.upgrade() else { return };
+            refresh_device_info_state(&w);
+            set_status(&w, false, "Refreshed device & system information.".into());
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_sign_in(move || {
+            let Some(w) = wh.upgrade() else { return };
+            let email = w.get_auth_email().to_string();
+            let password = w.get_auth_password().to_string();
+            run_auth(&w, move |store| store.sign_in(&email, &password).map(Some));
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_create_account(move || {
+            let Some(w) = wh.upgrade() else { return };
+            let name = w.get_auth_name().to_string();
+            let username = w.get_auth_username().to_string();
+            let email = w.get_auth_email().to_string();
+            let password = w.get_auth_password().to_string();
+            let confirm = w.get_auth_confirm().to_string();
+            run_auth(&w, move |store| {
+                store
+                    .create_account(&name, &username, &email, &password, &confirm)
+                    .map(Some)
+            });
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_sign_out(move || {
+            let Some(w) = wh.upgrade() else { return };
+            run_auth(&w, |store| store.sign_out().map(|()| None));
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_open_forgot_password(move || {
+            let Some(w) = wh.upgrade() else { return };
+            let url = AuthStore::load()
+                .map(|store| store.forgot_password_url())
+                .unwrap_or_else(|_| {
+                    format!("{}/forgot-password", mouse_me::core::auth::DEFAULT_API_BASE)
+                });
+            if open_url(&url) {
+                set_status(&w, false, "Opened the reset page".into());
+            } else {
+                w.set_auth_error(SharedString::from(format!("Couldn't open {url}")));
+            }
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_open_account_page(move || {
+            let Some(w) = wh.upgrade() else { return };
+            match AuthStore::load().ok().and_then(|store| store.profile_url()) {
+                Some(url) if open_url(&url) => set_status(&w, false, "Opened your profile".into()),
+                Some(url) => w.set_auth_error(SharedString::from(format!("Couldn't open {url}"))),
+                None => w.set_auth_error(SharedString::from("You're not signed in.")),
+            }
+        });
+    }
+
     main_window.run()?;
     Ok(())
+}
+
+fn apply_saved_session(window: &MainWindow) {
+    match AuthStore::load() {
+        Ok(store) => {
+            apply_auth_session(window, store.user());
+            if store.user().is_some() {
+                let weak = window.as_weak();
+                std::thread::spawn(move || {
+                    let result = AuthStore::load().and_then(|mut store| store.refresh());
+                    let _ = slint::invoke_from_event_loop(move || {
+                        let Some(window) = weak.upgrade() else { return };
+                        if let Ok(user) = result {
+                            apply_auth_session(&window, user.as_ref());
+                        }
+                    });
+                });
+            }
+        }
+        Err(error) => window.set_auth_error(SharedString::from(error)),
+    }
+}
+
+fn apply_auth_session(window: &MainWindow, user: Option<&AuthUser>) {
+    window.set_auth_signed_in(user.is_some());
+    window.set_auth_creating(false);
+    window.set_auth_busy(false);
+    window.set_auth_error(SharedString::from(""));
+    window.set_auth_password(SharedString::from(""));
+    window.set_auth_confirm(SharedString::from(""));
+    match user {
+        Some(user) => {
+            window.set_auth_session_email(SharedString::from(user.email.as_str()));
+            window.set_auth_session_name(SharedString::from(user.name.as_str()));
+            window.set_auth_session_username(SharedString::from(user.username.as_str()));
+            window.set_auth_email(SharedString::from(user.email.as_str()));
+            window.set_auth_joined(SharedString::from(
+                user.created_at
+                    .as_deref()
+                    .map(format_joined)
+                    .unwrap_or_default(),
+            ));
+            window.set_auth_published_label(SharedString::from(format_published(
+                user.published_count,
+            )));
+            if !user.name.is_empty() {
+                window.set_auth_name(SharedString::from(user.name.as_str()));
+            }
+            if !user.username.is_empty() {
+                window.set_auth_username(SharedString::from(user.username.as_str()));
+            }
+            load_auth_avatar(window, user.image.as_deref());
+        }
+        None => {
+            window.set_auth_session_email(SharedString::from(""));
+            window.set_auth_session_name(SharedString::from(""));
+            window.set_auth_session_username(SharedString::from(""));
+            window.set_auth_joined(SharedString::from(""));
+            window.set_auth_published_label(SharedString::from(""));
+            window.set_auth_has_avatar(false);
+            window.set_auth_avatar(Image::default());
+        }
+    }
+}
+
+fn load_auth_avatar(window: &MainWindow, image_url: Option<&str>) {
+    let Some(url) = image_url.filter(|url| !url.is_empty()) else {
+        window.set_auth_has_avatar(false);
+        window.set_auth_avatar(Image::default());
+        return;
+    };
+    let url = url.to_string();
+    let weak = window.as_weak();
+    std::thread::spawn(move || {
+        let result = AuthStore::download_bytes(&url).and_then(|bytes| decode_avatar(&bytes));
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = weak.upgrade() else { return };
+            if !window.get_auth_signed_in() {
+                return;
+            }
+            if let Ok((width, height, rgba)) = result {
+                let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(width, height);
+                let slice = buffer.make_mut_bytes();
+                if slice.len() == rgba.len() {
+                    slice.copy_from_slice(&rgba);
+                    window.set_auth_avatar(Image::from_rgba8(buffer));
+                    window.set_auth_has_avatar(true);
+                }
+            }
+        });
+    });
+}
+
+fn refresh_profile(window: &MainWindow) {
+    let weak = window.as_weak();
+    std::thread::spawn(move || {
+        let result = AuthStore::load().and_then(|mut store| store.refresh());
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = weak.upgrade() else { return };
+            if let Ok(user) = result {
+                apply_auth_session(&window, user.as_ref());
+            }
+        });
+    });
+}
+
+fn run_auth(
+    window: &MainWindow,
+    op: impl FnOnce(&mut AuthStore) -> Result<Option<AuthUser>, String> + Send + 'static,
+) {
+    if window.get_auth_busy() {
+        return;
+    }
+    window.set_auth_busy(true);
+    window.set_auth_error(SharedString::from(""));
+    let weak = window.as_weak();
+    std::thread::spawn(move || {
+        let result = AuthStore::load().and_then(|mut store| op(&mut store));
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = weak.upgrade() else { return };
+            match result {
+                Ok(user) => apply_auth_session(&window, user.as_ref()),
+                Err(error) => {
+                    window.set_auth_busy(false);
+                    window.set_auth_error(SharedString::from(error));
+                }
+            }
+        });
+    });
 }
 
 fn apply_settings_to_window(window: &MainWindow, settings: &AppSettings) {
@@ -558,6 +771,8 @@ fn apply_settings_to_window(window: &MainWindow, settings: &AppSettings) {
     window.set_hide_on_touch(settings.hide_on_touch);
     window.set_no_hardware_cursors(settings.no_hardware_cursors);
     window.set_inactive_timeout(settings.inactive_timeout);
+    window.set_auto_update(settings.auto_update);
+    window.set_auto_update_when(settings.auto_update_when_index());
     window.set_page(settings.last_page.clamp(0, 5));
     window.set_active_size(settings.preferred_size as i32);
 }
@@ -585,6 +800,8 @@ fn read_settings(window: &MainWindow) -> AppSettings {
         hide_on_touch: window.get_hide_on_touch(),
         no_hardware_cursors: window.get_no_hardware_cursors(),
         inactive_timeout: window.get_inactive_timeout(),
+        auto_update: window.get_auto_update(),
+        auto_update_when: AppSettings::auto_update_when_from_index(window.get_auto_update_when()),
     }
 }
 
@@ -889,59 +1106,138 @@ fn open_url(url: &str) -> bool {
     Command::new("xdg-open").arg(url).spawn().is_ok()
 }
 
-fn latest_release_tag() -> Result<String, String> {
-    let output = Command::new("curl")
-        .args([
-            "-sS",
-            "-f",
-            "-H",
-            "Accept: application/vnd.github+json",
-            "-H",
-            "User-Agent: mouse-me",
-            "https://api.github.com/repos/Grenish/mouse-me/releases/latest",
-        ])
-        .output()
-        .map_err(|e| e.to_string())?;
-
-    if !output.status.success() {
-        if output.status.code() == Some(404) {
-            return Err("no-release".into());
-        }
-        let details = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if details.is_empty() {
-            format!("curl failed with status {}", output.status)
-        } else {
-            details
-        });
+fn start_auto_update(window: &MainWindow) {
+    if !window.get_auto_update() {
+        return;
     }
-
-    let parsed: serde_json::Value =
-        serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
-    let tag = parsed
-        .get("tag_name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim();
-    if tag.is_empty() {
-        return Err("no-release".into());
-    }
-    Ok(tag.to_string())
+    check_for_update(window, false);
 }
 
-fn version_cmp(left: &str, right: &str) -> std::cmp::Ordering {
-    let parse = |s: &str| {
-        s.trim()
-            .trim_start_matches('v')
-            .split('.')
-            .filter_map(|part| part.parse::<u32>().ok())
-            .collect::<Vec<_>>()
-    };
-    let mut a = parse(left);
-    let mut b = parse(right);
-    let n = a.len().max(b.len());
-    a.resize(n, 0);
-    b.resize(n, 0);
-    a.cmp(&b)
+fn check_for_update(window: &MainWindow, interactive: bool) {
+    if window.get_checking_update() {
+        return;
+    }
+    window.set_checking_update(true);
+    if interactive {
+        window.set_update_available(false);
+        window.set_update_note(SharedString::from("Checking GitHub…"));
+    }
+    let current = updater::current_version().to_string();
+    let when = AppSettings::auto_update_when_from_index(window.get_auto_update_when());
+    let auto = window.get_auto_update();
+    let weak = window.as_weak();
+    std::thread::spawn(move || {
+        if !interactive {
+            std::thread::sleep(std::time::Duration::from_millis(1200));
+        }
+        let result = updater::latest_release();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = weak.upgrade() else { return };
+            match result {
+                Ok(release) if updater::is_newer(&release.version, &current) => {
+                    if interactive {
+                        window.set_checking_update(false);
+                        window.set_update_tag(SharedString::from(release.tag.clone()));
+                        window.set_update_available(true);
+                        window.set_update_note(SharedString::from(""));
+                    } else if auto {
+                        match when.as_str() {
+                            "instantly" => apply_release_now(&window, release.tag.clone(), true),
+                            "background" => apply_release_now(&window, release.tag.clone(), false),
+                            _ => stage_release(&window, release),
+                        }
+                    } else {
+                        window.set_checking_update(false);
+                    }
+                }
+                Ok(_) => {
+                    window.set_checking_update(false);
+                    window.set_update_available(false);
+                    if interactive {
+                        window.set_update_note(SharedString::from(format!(
+                            "You're on {current}. That's the latest published build."
+                        )));
+                    }
+                }
+                Err(kind) if kind == "no-release" => {
+                    window.set_checking_update(false);
+                    window.set_update_available(false);
+                    if interactive {
+                        window.set_update_note(SharedString::from(format!(
+                            "You're on {current}. No newer release has been published yet."
+                        )));
+                    }
+                }
+                Err(_) => {
+                    window.set_checking_update(false);
+                    if interactive {
+                        window.set_update_note(SharedString::from(
+                            "Couldn't reach GitHub. Check the connection and try again.",
+                        ));
+                    }
+                }
+            }
+        });
+    });
+}
+
+fn stage_release(window: &MainWindow, release: Release) {
+    window.set_checking_update(true);
+    window.set_update_note(SharedString::from(format!(
+        "Downloading {} for the next launch…",
+        release.tag
+    )));
+    let weak = window.as_weak();
+    std::thread::spawn(move || {
+        let result = updater::stage_update(&release);
+        let tag = release.tag;
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = weak.upgrade() else { return };
+            window.set_checking_update(false);
+            match result {
+                Ok(_) => window.set_update_note(SharedString::from(format!(
+                    "{tag} will install the next time you open Mouse Me."
+                ))),
+                Err(error) => window.set_update_note(SharedString::from(error)),
+            }
+        });
+    });
+}
+
+fn apply_release_now(window: &MainWindow, tag: String, restart: bool) {
+    window.set_checking_update(true);
+    window.set_update_available(false);
+    window.set_update_note(SharedString::from(format!("Downloading {tag}…")));
+    let weak = window.as_weak();
+    std::thread::spawn(move || {
+        let installed = updater::latest_release()
+            .and_then(|release| updater::install_update(&release).map(|_| release.tag));
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = weak.upgrade() else { return };
+            match installed {
+                Ok(installed_tag) => {
+                    if restart {
+                        window.set_update_note(SharedString::from(format!(
+                            "{installed_tag} is installed. Restarting…"
+                        )));
+                        if let Err(error) = updater::relaunch() {
+                            window.set_checking_update(false);
+                            window.set_update_note(SharedString::from(error));
+                        }
+                    } else {
+                        window.set_checking_update(false);
+                        window.set_update_note(SharedString::from(format!(
+                            "{installed_tag} is installed. Restart Mouse Me to use it."
+                        )));
+                    }
+                }
+                Err(error) => {
+                    window.set_checking_update(false);
+                    window.set_update_note(SharedString::from(error));
+                }
+            }
+        });
+    });
 }
 
 fn set_status(window: &MainWindow, is_error: bool, message: String) {
@@ -1020,4 +1316,16 @@ fn decode_percent_bytes(raw: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+fn refresh_device_info_state(window: &MainWindow) {
+    let info = collect_device_info();
+    window.set_device_os(SharedString::from(info.os));
+    window.set_device_desktop(SharedString::from(info.desktop));
+    window.set_device_session(SharedString::from(info.session));
+    window.set_device_kernel(SharedString::from(info.kernel));
+    window.set_device_cursor(SharedString::from(info.cursor));
+    window.set_device_gtk(SharedString::from(info.gtk));
+    window.set_device_qt(SharedString::from(info.qt));
+    window.set_device_env(SharedString::from(info.env_vars));
 }
