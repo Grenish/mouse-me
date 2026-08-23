@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag to publish, for example v0.3.0"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -14,8 +20,23 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
+      - name: Resolve release tag
+        id: release
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          PUSH_TAG: ${{ github.ref_name }}
+        run: |
+          RELEASE_TAG="${INPUT_TAG:-$PUSH_TAG}"
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected a semantic version tag such as v0.3.0, got: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag }}
 
       - name: Install Linux build dependencies
         run: |
@@ -53,7 +74,7 @@ jobs:
 
       - name: Package release files
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           mkdir -p dist
           tar -C target/release \
@@ -66,10 +87,18 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
-          gh release create "${RELEASE_TAG}" \
-            dist/* \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "Mouse Me ${RELEASE_TAG}" \
-            --generate-notes
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" \
+              dist/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber
+          else
+            gh release create "${RELEASE_TAG}" \
+              dist/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "Mouse Me ${RELEASE_TAG}" \
+              --generate-notes \
+              --verify-tag
+          fi
