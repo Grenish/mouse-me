@@ -6,6 +6,9 @@
 
 A cursor manager for Linux desktops (Hyprland, Omarchy, GTK, Qt, and X11). It includes a Slint GUI and a CLI in one binary.
 
+> [!NOTE]
+> Mouse Me is currently in active beta development. You may encounter bugs or incomplete features. If you find an issue, please open a GitHub issue with steps to reproduce it so it can be investigated and fixed.
+
 ![Mouse Me](assets/screens/main.png)
 
 > [!IMPORTANT]
