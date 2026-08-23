@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use super::applier::ApplyTargets;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppSettings {
     pub apply_hyprland: bool,
     pub apply_gsettings: bool,
@@ -28,6 +29,8 @@ pub struct AppSettings {
     pub hide_on_touch: bool,
     pub no_hardware_cursors: bool,
     pub inactive_timeout: i32,
+    pub auto_update: bool,
+    pub auto_update_when: String,
 }
 
 impl Default for AppSettings {
@@ -54,11 +57,29 @@ impl Default for AppSettings {
             hide_on_touch: true,
             no_hardware_cursors: false,
             inactive_timeout: 0,
+            auto_update: false,
+            auto_update_when: "next-launch".into(),
         }
     }
 }
 
 impl AppSettings {
+    pub fn auto_update_when_index(&self) -> i32 {
+        match self.auto_update_when.as_str() {
+            "background" => 1,
+            "instantly" => 2,
+            _ => 0,
+        }
+    }
+
+    pub fn auto_update_when_from_index(index: i32) -> String {
+        match index {
+            1 => "background".into(),
+            2 => "instantly".into(),
+            _ => "next-launch".into(),
+        }
+    }
+
     pub fn config_path() -> Option<PathBuf> {
         dirs::config_dir().map(|d| d.join("mouse-me").join("settings.json"))
     }
