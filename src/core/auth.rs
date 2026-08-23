@@ -1,31 +1,94 @@
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::time::Duration;
 
-const SALT_LEN: usize = 16;
-const HASH_ITERS: u32 = 16_384;
+pub const DEFAULT_API_BASE: &str = "https://mouse-me-web.vercel.app";
+const API_ENV: &str = "MOUSE_ME_API_URL";
+const USERNAME_MAX: usize = 32;
+const NAME_MAX: usize = 80;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct AuthFile {
     #[serde(default)]
-    accounts: Vec<StoredAccount>,
+    api_base: Option<String>,
     #[serde(default)]
-    session_email: Option<String>,
+    cookie: Option<String>,
+    #[serde(default)]
+    token: Option<String>,
+    #[serde(default)]
+    user: Option<AuthUser>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct StoredAccount {
-    email: String,
-    salt: String,
-    hash: String,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuthUser {
+    pub id: String,
+    pub email: String,
+    pub name: String,
+    pub username: String,
+    #[serde(default)]
+    pub image: Option<String>,
+    #[serde(default, alias = "createdAt")]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub published_count: u32,
 }
 
 #[derive(Debug, Clone)]
 pub struct AuthStore {
     path: PathBuf,
     data: AuthFile,
+    api_base: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AuthSuccessBody {
+    token: Option<String>,
+    user: Option<RemoteUser>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SessionBody {
+    user: Option<RemoteUser>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct RemoteUser {
+    id: Option<String>,
+    email: Option<String>,
+    name: Option<String>,
+    username: Option<String>,
+    image: Option<String>,
+    #[serde(default, alias = "createdAt")]
+    created_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct PackStatsBody {
+    #[serde(default)]
+    published: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct SettingsBody {
+    user: Option<RemoteUser>,
+    #[serde(default, rename = "packStats")]
+    pack_stats: PackStatsBody,
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorBody {
+    code: Option<String>,
+    message: Option<String>,
+}
+
+struct HttpResponse {
+    status: u16,
+    set_cookies: Vec<String>,
+    body: String,
+    location: Option<String>,
 }
 
 impl AuthStore {
@@ -41,75 +104,334 @@ impl AuthStore {
     pub fn load_from(path: PathBuf) -> Self {
         let data = fs::read_to_string(&path)
             .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .and_then(|raw| serde_json::from_str::<AuthFile>(&raw).ok())
+            .filter(is_remote_session_file)
             .unwrap_or_default();
-        Self { path, data }
+        let api_base = data
+            .api_base
+            .as_deref()
+            .map(normalize_api_base)
+            .filter(|base| !base.is_empty())
+            .unwrap_or_else(resolve_api_base);
+        Self {
+            path,
+            data,
+            api_base,
+        }
+    }
+
+    pub fn with_api_base(mut self, api_base: impl Into<String>) -> Self {
+        self.api_base = normalize_api_base(&api_base.into());
+        self
+    }
+
+    pub fn api_base(&self) -> &str {
+        &self.api_base
+    }
+
+    pub fn user(&self) -> Option<&AuthUser> {
+        self.data.user.as_ref()
     }
 
     pub fn session_email(&self) -> Option<&str> {
-        self.data.session_email.as_deref()
+        self.data.user.as_ref().map(|user| user.email.as_str())
+    }
+
+    pub fn profile_url(&self) -> Option<String> {
+        self.data
+            .user
+            .as_ref()
+            .map(|user| format!("{}/u/{}", self.api_base, urlencoding_path(&user.username)))
+    }
+
+    pub fn forgot_password_url(&self) -> String {
+        format!("{}/forgot-password", self.api_base)
+    }
+
+    pub fn sign_in(&mut self, email: &str, password: &str) -> Result<AuthUser, String> {
+        let email = normalize_email(email)?;
+        validate_password(password)?;
+        let body = serde_json::json!({
+            "email": email,
+            "password": password,
+            "rememberMe": true,
+        });
+        let response = self.request("POST", "/api/auth/sign-in/email", true, Some(&body))?;
+        self.apply_auth_response("sign in", response)
     }
 
     pub fn create_account(
         &mut self,
+        name: &str,
+        username: &str,
         email: &str,
         password: &str,
         confirm: &str,
-    ) -> Result<String, String> {
+    ) -> Result<AuthUser, String> {
+        let name = normalize_name(name)?;
+        let username = normalize_username(username)?;
         let email = normalize_email(email)?;
         validate_password(password)?;
         if password != confirm {
             return Err("Passwords do not match.".into());
         }
-        if self.find_account(&email).is_some() {
-            return Err("An account already exists for that email. Sign in instead.".into());
-        }
-
-        let salt = random_bytes(SALT_LEN)?;
-        let hash = hash_password(password, &salt);
-        self.data.accounts.push(StoredAccount {
-            email: email.clone(),
-            salt: to_hex(&salt),
-            hash: to_hex(&hash),
+        let body = serde_json::json!({
+            "email": email,
+            "password": password,
+            "name": name,
+            "username": username,
         });
-        self.data.session_email = Some(email.clone());
-        self.save()?;
-        Ok(email)
-    }
-
-    pub fn sign_in(&mut self, email: &str, password: &str) -> Result<String, String> {
-        let email = normalize_email(email)?;
-        validate_password(password)?;
-        let account = self
-            .find_account(&email)
-            .ok_or_else(|| "No account for that email.".to_string())?
-            .clone();
-
-        let salt = from_hex(&account.salt)?;
-        let expected = from_hex(&account.hash)?;
-        if salt.len() != SALT_LEN || expected.len() != 32 {
-            return Err("Could not read the saved account.".into());
-        }
-        let actual = hash_password(password, &salt);
-        if !constant_time_eq(&expected, &actual) {
-            return Err("Wrong password.".into());
-        }
-
-        self.data.session_email = Some(email.clone());
-        self.save()?;
-        Ok(email)
+        let response = self.request("POST", "/api/auth/sign-up/email", true, Some(&body))?;
+        self.apply_auth_response("create an account", response)
     }
 
     pub fn sign_out(&mut self) -> Result<(), String> {
-        self.data.session_email = None;
+        if self.data.cookie.is_some() || self.data.token.is_some() {
+            let body = serde_json::json!({});
+            let _ = self.request("POST", "/api/auth/sign-out", true, Some(&body));
+        }
+        self.data.cookie = None;
+        self.data.token = None;
+        self.data.user = None;
+        self.data.api_base = Some(self.api_base.clone());
         self.save()
     }
 
-    fn find_account(&self, email: &str) -> Option<&StoredAccount> {
-        self.data
-            .accounts
-            .iter()
-            .find(|account| account.email == email)
+    pub fn refresh(&mut self) -> Result<Option<AuthUser>, String> {
+        if self.data.cookie.is_none() && self.data.token.is_none() {
+            self.data.user = None;
+            return Ok(None);
+        }
+        match self.request("GET", "/api/auth/get-session", false, None) {
+            Ok(response) if response.status == 200 => {
+                if response.body.trim() == "null" || response.body.trim().is_empty() {
+                    self.clear_session()?;
+                    return Ok(None);
+                }
+                let parsed: SessionBody =
+                    serde_json::from_str(&response.body).unwrap_or(SessionBody { user: None });
+                let Some(user) = parsed.user.and_then(|remote| remote.into_user()) else {
+                    self.clear_session()?;
+                    return Ok(None);
+                };
+                self.merge_cookies(&response.set_cookies);
+                self.data.user = Some(user);
+                self.data.api_base = Some(self.api_base.clone());
+                self.save()?;
+                Ok(self.hydrate_profile())
+            }
+            Ok(response) if response.status == 401 => {
+                self.clear_session()?;
+                Ok(None)
+            }
+            Ok(_) | Err(_) => Ok(self.data.user.clone()),
+        }
+    }
+
+    fn apply_auth_response(
+        &mut self,
+        action: &str,
+        response: HttpResponse,
+    ) -> Result<AuthUser, String> {
+        if !(200..300).contains(&response.status) {
+            return Err(map_error_body(action, response.status, &response.body));
+        }
+        let parsed: AuthSuccessBody = serde_json::from_str(&response.body).map_err(|_| {
+            format!("Mouse Me returned an unexpected response while trying to {action}.")
+        })?;
+        let user = parsed
+            .user
+            .and_then(|remote| remote.into_user())
+            .ok_or_else(|| format!("Mouse Me did not return a user while trying to {action}."))?;
+        self.merge_cookies(&response.set_cookies);
+        if let Some(token) = parsed.token.filter(|token| !token.is_empty()) {
+            self.data.token = Some(token.clone());
+            if self.data.cookie.as_deref().unwrap_or("").is_empty() {
+                self.data.cookie = Some(format!("better-auth.session_token={token}"));
+            }
+        }
+        if self.data.cookie.as_deref().unwrap_or("").is_empty() && self.data.token.is_none() {
+            return Err(format!(
+                "Mouse Me signed you in but did not return a session. Try {action} again."
+            ));
+        }
+        self.data.user = Some(user);
+        self.data.api_base = Some(self.api_base.clone());
+        self.save()?;
+        Ok(self
+            .hydrate_profile()
+            .or_else(|| self.data.user.clone())
+            .ok_or_else(|| "Could not read the signed-in account.".to_string())?)
+    }
+
+    fn hydrate_profile(&mut self) -> Option<AuthUser> {
+        let response = self.request("GET", "/api/user/settings", true, None).ok()?;
+        if response.status != 200 {
+            return self.data.user.clone();
+        }
+        let parsed: SettingsBody = serde_json::from_str(&response.body).ok()?;
+        let mut user = parsed
+            .user
+            .and_then(RemoteUser::into_user)
+            .or_else(|| self.data.user.clone())?;
+        user.published_count = parsed.pack_stats.published;
+        if user.created_at.is_none() {
+            if let Some(existing) = self
+                .data
+                .user
+                .as_ref()
+                .and_then(|item| item.created_at.clone())
+            {
+                user.created_at = Some(existing);
+            }
+        }
+        self.merge_cookies(&response.set_cookies);
+        self.data.user = Some(user.clone());
+        self.data.api_base = Some(self.api_base.clone());
+        let _ = self.save();
+        Some(user)
+    }
+
+    pub fn download_bytes(url: &str) -> Result<Vec<u8>, String> {
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return Err("Invalid image URL.".into());
+        }
+        let agent = ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(20))
+            .redirects(5)
+            .user_agent(&user_agent())
+            .build();
+        let response = match agent.get(url).call() {
+            Ok(response) => response,
+            Err(ureq::Error::Status(_, response)) => response,
+            Err(ureq::Error::Transport(error)) => {
+                return Err(format!("Could not download the profile photo: {error}"));
+            }
+        };
+        if !(200..300).contains(&response.status()) {
+            return Err("Could not download the profile photo.".into());
+        }
+        let mut bytes = Vec::new();
+        response
+            .into_reader()
+            .take(2_000_000)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("Could not download the profile photo: {error}"))?;
+        if bytes.is_empty() {
+            return Err("The profile photo was empty.".into());
+        }
+        Ok(bytes)
+    }
+
+    fn clear_session(&mut self) -> Result<(), String> {
+        self.data.cookie = None;
+        self.data.token = None;
+        self.data.user = None;
+        self.data.api_base = Some(self.api_base.clone());
+        self.save()
+    }
+
+    fn merge_cookies(&mut self, set_cookies: &[String]) {
+        let merged = merge_cookie_header(self.data.cookie.as_deref().unwrap_or(""), set_cookies);
+        self.data.cookie = if merged.is_empty() {
+            None
+        } else {
+            Some(merged)
+        };
+    }
+
+    fn request(
+        &self,
+        method: &str,
+        path: &str,
+        send_credentials: bool,
+        body: Option<&serde_json::Value>,
+    ) -> Result<HttpResponse, String> {
+        let url = format!("{}{path}", self.api_base);
+        let mut last_origin_error = None;
+        for origin in request_origins(&self.api_base) {
+            let response =
+                self.send_following_redirects(method, &url, &origin, send_credentials, body)?;
+            if response.status == 403 && is_invalid_origin(&response.body) {
+                last_origin_error = Some(response);
+                continue;
+            }
+            return Ok(response);
+        }
+        last_origin_error.ok_or_else(|| "Could not reach Mouse Me.".to_string())
+    }
+
+    fn send_following_redirects(
+        &self,
+        method: &str,
+        url: &str,
+        origin: &str,
+        send_credentials: bool,
+        body: Option<&serde_json::Value>,
+    ) -> Result<HttpResponse, String> {
+        let mut current = url.to_string();
+        for _ in 0..5 {
+            let response = self.send_once(method, &current, origin, send_credentials, body)?;
+            if matches!(response.status, 301 | 302 | 303 | 307 | 308) {
+                if let Some(location) = response.location.as_deref().filter(|loc| !loc.is_empty()) {
+                    current = resolve_redirect(&current, location);
+                    continue;
+                }
+            }
+            return Ok(response);
+        }
+        Err("Could not reach Mouse Me (too many redirects).".into())
+    }
+
+    fn send_once(
+        &self,
+        method: &str,
+        url: &str,
+        origin: &str,
+        send_credentials: bool,
+        body: Option<&serde_json::Value>,
+    ) -> Result<HttpResponse, String> {
+        let agent = ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(20))
+            .redirects(0)
+            .user_agent(&user_agent())
+            .build();
+        let mut request = match method {
+            "GET" => agent.get(url),
+            "POST" => agent.post(url),
+            _ => return Err("Unsupported auth request.".into()),
+        };
+        request = request
+            .set("Accept", "application/json")
+            .set("Origin", origin)
+            .set("User-Agent", &user_agent());
+        if send_credentials || method == "GET" {
+            if let Some(cookie) = self
+                .data
+                .cookie
+                .as_deref()
+                .filter(|cookie| !cookie.is_empty())
+            {
+                request = request.set("Cookie", cookie);
+            }
+            if let Some(token) = self.data.token.as_deref().filter(|token| !token.is_empty()) {
+                request = request.set("Authorization", &format!("Bearer {token}"));
+            }
+        }
+        let result = if let Some(body) = body {
+            request
+                .set("Content-Type", "application/json")
+                .send_json(body.clone())
+        } else {
+            request.call()
+        };
+        match result {
+            Ok(response) => read_response(response),
+            Err(ureq::Error::Status(_, response)) => read_response(response),
+            Err(ureq::Error::Transport(error)) => {
+                Err(network_error(&self.api_base, &error.to_string()))
+            }
+        }
     }
 
     fn save(&self) -> Result<(), String> {
@@ -128,6 +450,72 @@ impl AuthStore {
             .map_err(|error| error.error.to_string())?;
         Ok(())
     }
+}
+
+impl RemoteUser {
+    fn into_user(self) -> Option<AuthUser> {
+        Some(AuthUser {
+            id: self.id.filter(|id| !id.is_empty())?,
+            email: self.email.filter(|email| !email.is_empty())?,
+            name: self.name.unwrap_or_default(),
+            username: self.username.unwrap_or_default(),
+            image: self.image.filter(|image| !image.is_empty()),
+            created_at: self.created_at.filter(|value| !value.is_empty()),
+            published_count: 0,
+        })
+    }
+}
+
+pub fn format_joined(raw: &str) -> String {
+    let date = raw.get(..10).unwrap_or(raw);
+    let mut parts = date.split('-');
+    let year = parts.next().unwrap_or("");
+    let month = match parts.next().unwrap_or("") {
+        "01" => "Jan",
+        "02" => "Feb",
+        "03" => "Mar",
+        "04" => "Apr",
+        "05" => "May",
+        "06" => "Jun",
+        "07" => "Jul",
+        "08" => "Aug",
+        "09" => "Sep",
+        "10" => "Oct",
+        "11" => "Nov",
+        "12" => "Dec",
+        _ => return raw.to_string(),
+    };
+    let day = parts
+        .next()
+        .and_then(|value| value.parse::<u8>().ok())
+        .unwrap_or(0);
+    if year.len() != 4 || day == 0 {
+        return raw.to_string();
+    }
+    format!("{day} {month} {year}")
+}
+
+pub fn format_published(count: u32) -> String {
+    match count {
+        0 => "None yet".into(),
+        1 => "1 pack".into(),
+        n => format!("{n} packs"),
+    }
+}
+
+pub fn decode_avatar(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+    let image = image::load_from_memory(bytes).map_err(|_| "Could not read the profile photo.")?;
+    let image = image.resize(128, 128, image::imageops::FilterType::Triangle);
+    let rgba = image.to_rgba8();
+    Ok((rgba.width(), rgba.height(), rgba.into_raw()))
+}
+
+pub fn resolve_api_base() -> String {
+    std::env::var(API_ENV)
+        .ok()
+        .map(|value| normalize_api_base(&value))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| normalize_api_base(DEFAULT_API_BASE))
 }
 
 pub fn normalize_email(raw: &str) -> Result<String, String> {
@@ -171,84 +559,278 @@ pub fn validate_password(password: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn hash_password(password: &str, salt: &[u8]) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(salt);
-    hasher.update(password.as_bytes());
-    hasher.update(HASH_ITERS.to_le_bytes());
-    let mut acc: [u8; 32] = hasher.finalize().into();
-    for _ in 1..HASH_ITERS {
-        let mut hasher = Sha256::new();
-        hasher.update(salt);
-        hasher.update(acc);
-        acc = hasher.finalize().into();
+pub fn normalize_name(raw: &str) -> Result<String, String> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err("Enter your name.".into());
     }
-    acc
+    if name.chars().any(|ch| ch.is_control()) {
+        return Err("Name contains characters that cannot be used.".into());
+    }
+    if name.chars().count() > NAME_MAX {
+        return Err(format!("Name must be {NAME_MAX} characters or fewer."));
+    }
+    Ok(name.to_string())
 }
 
-fn random_bytes(len: usize) -> Result<Vec<u8>, String> {
-    let mut file = fs::File::open("/dev/urandom")
-        .map_err(|error| format!("Could not generate a password salt: {}", error))?;
-    let mut bytes = vec![0u8; len];
-    file.read_exact(&mut bytes)
-        .map_err(|error| format!("Could not generate a password salt: {}", error))?;
-    Ok(bytes)
+pub fn normalize_username(raw: &str) -> Result<String, String> {
+    let username = raw.trim().trim_start_matches('@').to_ascii_lowercase();
+    if username.is_empty() {
+        return Err("Choose a username.".into());
+    }
+    if username.len() > USERNAME_MAX {
+        return Err("Use letters, numbers, and hyphens.".into());
+    }
+    let valid = username.chars().enumerate().all(|(index, ch)| match ch {
+        'a'..='z' | '0'..='9' => true,
+        '-' => index > 0 && index + 1 < username.len(),
+        _ => false,
+    });
+    if !valid {
+        return Err("Use letters, numbers, and hyphens.".into());
+    }
+    Ok(username)
 }
 
-fn to_hex(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(TABLE[(byte >> 4) as usize] as char);
-        out.push(TABLE[(byte & 0x0f) as usize] as char);
+fn is_remote_session_file(data: &AuthFile) -> bool {
+    data.cookie.is_some() || data.token.is_some() || data.user.is_some() || data.api_base.is_some()
+}
+
+fn normalize_api_base(raw: &str) -> String {
+    raw.trim().trim_end_matches('/').to_string()
+}
+
+fn user_agent() -> String {
+    format!("Mouse-Me/{} (Linux)", env!("CARGO_PKG_VERSION"))
+}
+
+fn urlencoding_path(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => out.push(ch),
+            _ => {
+                for byte in ch.encode_utf8(&mut [0; 4]).as_bytes() {
+                    out.push_str(&format!("%{byte:02X}"));
+                }
+            }
+        }
     }
     out
 }
 
-fn from_hex(raw: &str) -> Result<Vec<u8>, String> {
-    if raw.len() % 2 != 0 || raw.is_empty() {
-        return Err("Could not read the saved account.".into());
-    }
-    let mut out = Vec::with_capacity(raw.len() / 2);
-    let bytes = raw.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        let high = hex_nibble(bytes[index])?;
-        let low = hex_nibble(bytes[index + 1])?;
-        out.push((high << 4) | low);
-        index += 2;
-    }
-    Ok(out)
-}
-
-fn hex_nibble(byte: u8) -> Result<u8, String> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        b'A'..=b'F' => Ok(byte - b'A' + 10),
-        _ => Err("Could not read the saved account.".into()),
+fn network_error(base: &str, detail: &str) -> String {
+    let lower = detail.to_ascii_lowercase();
+    if lower.contains("connection refused") || lower.contains("failed to connect") {
+        format!("Could not reach Mouse Me at {base}. Start the website, or set {API_ENV}.")
+    } else {
+        "Could not reach Mouse Me. Check your connection and try again.".into()
     }
 }
 
-fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() {
-        return false;
+fn map_error_body(action: &str, status: u16, body: &str) -> String {
+    let parsed: ErrorBody = serde_json::from_str(body).unwrap_or(ErrorBody {
+        code: None,
+        message: None,
+    });
+    match parsed.code.as_deref() {
+        Some("INVALID_EMAIL_OR_PASSWORD") | Some("INVALID_PASSWORD") => {
+            "Wrong email or password.".into()
+        }
+        Some("USER_ALREADY_EXISTS") | Some("USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL") => {
+            "An account already exists for that email. Sign in instead.".into()
+        }
+        Some("INVALID_EMAIL") => "That email is not valid.".into(),
+        Some("PASSWORD_TOO_SHORT") => "Password must be at least 8 characters.".into(),
+        Some("PASSWORD_TOO_LONG") => "Password is too long.".into(),
+        Some("FAILED_TO_CREATE_USER") => {
+            "Could not create that account. The username or email may already be taken.".into()
+        }
+        Some("CROSS_SITE_NAVIGATION_LOGIN_BLOCKED") | Some("INVALID_ORIGIN") => {
+            "Could not sign in because the site rejected this app. Try again.".into()
+        }
+        _ => {
+            if let Some(message) = parsed
+                .message
+                .as_deref()
+                .map(str::trim)
+                .filter(|message| !message.is_empty())
+            {
+                if message.chars().count() <= 160 {
+                    return message.to_string();
+                }
+            }
+            match status {
+                401 => "Wrong email or password.".into(),
+                409 => "An account already exists for that email. Sign in instead.".into(),
+                422 | 400 => format!("Could not {action}. Check the details and try again."),
+                _ => format!("Could not {action} (HTTP {status})."),
+            }
+        }
     }
-    let mut acc = 0u8;
-    for (a, b) in left.iter().zip(right.iter()) {
-        acc |= a ^ b;
+}
+
+fn read_response(response: ureq::Response) -> Result<HttpResponse, String> {
+    let status = response.status();
+    let location = response.header("location").map(ToOwned::to_owned);
+    let mut set_cookies = Vec::new();
+    if let Some(value) = response.header("set-cookie") {
+        set_cookies.push(value.to_string());
     }
-    acc == 0
+    let body = response.into_string().unwrap_or_default();
+    Ok(HttpResponse {
+        status,
+        set_cookies,
+        body,
+        location,
+    })
+}
+
+fn request_origins(api_base: &str) -> Vec<String> {
+    let mut origins = vec![api_base.to_string()];
+    for extra in ["http://localhost:3000", "http://127.0.0.1:3000"] {
+        if !origins.iter().any(|origin| origin == extra) {
+            origins.push(extra.to_string());
+        }
+    }
+    origins
+}
+
+fn is_invalid_origin(body: &str) -> bool {
+    body.contains("INVALID_ORIGIN") || body.to_ascii_lowercase().contains("invalid origin")
+}
+
+fn resolve_redirect(current: &str, location: &str) -> String {
+    if location.starts_with("http://") || location.starts_with("https://") {
+        return location.to_string();
+    }
+    if location.starts_with('/') {
+        if let Some(scheme_end) = current.find("://") {
+            let host = current[scheme_end + 3..]
+                .split('/')
+                .next()
+                .unwrap_or(&current[scheme_end + 3..]);
+            return format!("{}://{}{}", &current[..scheme_end], host, location);
+        }
+    }
+    location.to_string()
+}
+
+fn merge_cookie_header(existing: &str, set_cookies: &[String]) -> String {
+    let mut cookies = BTreeMap::new();
+    for part in existing.split(';') {
+        insert_cookie(&mut cookies, part);
+    }
+    for header in set_cookies {
+        if let Some(pair) = header.split(';').next() {
+            insert_cookie(&mut cookies, pair);
+        }
+    }
+    cookies
+        .into_iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn insert_cookie(cookies: &mut BTreeMap<String, String>, pair: &str) {
+    let pair = pair.trim();
+    if pair.is_empty() {
+        return;
+    }
+    let (name, value) = match pair.split_once('=') {
+        Some((name, value)) => (name.trim(), value.trim()),
+        None => return,
+    };
+    if name.is_empty() || name.eq_ignore_ascii_case("path") || name.eq_ignore_ascii_case("domain") {
+        return;
+    }
+    if value.is_empty() {
+        cookies.remove(name);
+        return;
+    }
+    cookies.insert(name.to_string(), value.to_string());
 }
 
 #[cfg(test)]
 mod internals {
-    use super::{from_hex, to_hex};
+    use super::{
+        map_error_body, merge_cookie_header, normalize_api_base, normalize_name,
+        normalize_username, resolve_redirect,
+    };
 
     #[test]
-    fn hex_roundtrip() {
-        let bytes = [0x00, 0x0f, 0xa0, 0xff];
-        assert_eq!(to_hex(&bytes), "000fa0ff");
-        assert_eq!(from_hex("000fa0ff").unwrap(), bytes);
+    fn api_base_drops_trailing_slash() {
+        assert_eq!(
+            normalize_api_base("https://mouse-me-web.vercel.app/"),
+            "https://mouse-me-web.vercel.app"
+        );
+        assert_eq!(
+            resolve_redirect(
+                "https://mouse-me-web.vercel.app//api/auth/sign-in/email",
+                "/api/auth/sign-in/email"
+            ),
+            "https://mouse-me-web.vercel.app/api/auth/sign-in/email"
+        );
+    }
+
+    #[test]
+    fn username_rules_match_the_website() {
+        assert_eq!(normalize_username(" @Grenish-Rai ").unwrap(), "grenish-rai");
+        assert!(normalize_username("")
+            .unwrap_err()
+            .contains("Choose a username"));
+        assert!(normalize_username("-nope").unwrap_err().contains("letters"));
+        assert!(normalize_username("nope-").unwrap_err().contains("letters"));
+        assert!(normalize_username("no pe").unwrap_err().contains("letters"));
+    }
+
+    #[test]
+    fn name_is_required() {
+        assert_eq!(normalize_name("  Grenish  ").unwrap(), "Grenish");
+        assert!(normalize_name("   ")
+            .unwrap_err()
+            .contains("Enter your name"));
+    }
+
+    #[test]
+    fn cookie_merge_keeps_session_token() {
+        let merged = merge_cookie_header(
+            "",
+            &["better-auth.session_token=abc; Path=/; HttpOnly".into()],
+        );
+        assert_eq!(merged, "better-auth.session_token=abc");
+        let updated =
+            merge_cookie_header(&merged, &["better-auth.session_token=xyz; Path=/".into()]);
+        assert_eq!(updated, "better-auth.session_token=xyz");
+    }
+
+    #[test]
+    fn better_auth_error_codes_are_readable() {
+        assert_eq!(
+            map_error_body(
+                "sign in",
+                401,
+                r#"{"code":"INVALID_EMAIL_OR_PASSWORD","message":"Invalid email or password"}"#
+            ),
+            "Wrong email or password."
+        );
+        assert!(map_error_body(
+            "create an account",
+            422,
+            r#"{"code":"USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL"}"#
+        )
+        .contains("already exists"));
+    }
+
+    #[test]
+    fn joined_date_is_readable() {
+        assert_eq!(
+            super::format_joined("2026-08-22T17:05:39.000Z"),
+            "22 Aug 2026"
+        );
+        assert_eq!(super::format_published(0), "None yet");
+        assert_eq!(super::format_published(1), "1 pack");
+        assert_eq!(super::format_published(4), "4 packs");
     }
 }
