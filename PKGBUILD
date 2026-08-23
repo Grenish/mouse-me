@@ -1,6 +1,6 @@
 # Maintainer: Grenish Rai <grenishrai@gmail.com>
 pkgname=mouse-me
-pkgver=0.1.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Universal Linux & Omarchy cursor manager with modern Slint GUI & fast CLI"
 arch=('x86_64')
