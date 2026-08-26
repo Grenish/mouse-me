@@ -139,13 +139,7 @@ pub fn sanitize_theme_name(name: &str) -> String {
 }
 
 pub fn load_png_as_cursor(path: &Path) -> Result<CursorImage, String> {
-    let dyn_img = image::open(path).map_err(|e| format!("Could not read image: {}", e))?;
-    let rgba = dyn_img.to_rgba8();
-    Ok(CursorImage {
-        width: rgba.width(),
-        height: rgba.height(),
-        rgba: rgba.into_raw(),
-    })
+    super::images::load_bounded_rgba(path)
 }
 
 pub fn scale_cursor(

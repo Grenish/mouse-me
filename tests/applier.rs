@@ -38,6 +38,12 @@ fn validate_apply_input_accepts_normal_theme() {
 }
 
 #[test]
+fn validate_apply_input_rejects_path_names() {
+    let err = validate_apply_input("../evil", 24).unwrap_err();
+    assert!(err.contains("safe"));
+}
+
+#[test]
 fn apply_with_no_targets_returns_ok_without_touching_the_session() {
     let targets = ApplyTargets {
         hyprland: false,

@@ -45,15 +45,34 @@ CLI:
 
 ```bash
 mouse-me list
-mouse-me list --json
+mouse-me list --json --user --type xcursor
+mouse-me list --search modest
 mouse-me get
 mouse-me set modest-light
 mouse-me set modest-light 32
+mouse-me set modest-light 32 --all
+mouse-me add modest-light
+mouse-me add "Modest Light" --apply
 mouse-me add ~/Downloads/cursors.zip
+mouse-me add ~/Downloads/cursors.zip --apply
 mouse-me remove MyCustomCursor
+mouse-me auth login --email you@example.com
+mouse-me whoami
+mouse-me auth logout
+mouse-me account
+mouse-me account sign-up --name "Ada" --username ada --email ada@example.com
+mouse-me update
+mouse-me update --install
+mouse-me update --stage
+mouse-me doctor
+mouse-me doctor --json
+mouse-me settings
+mouse-me settings set apply-hyprland false
+mouse-me settings set auto-update true
+mouse-me settings apply-hypr
 ```
 
-`set` applies the theme and size across Hyprland, GTK, Qt, X11, and the user environment.
+`set` uses the apply targets saved in Settings. Pass `--all` to write every target. Passwords are prompted on a TTY, or read from `MOUSE_ME_PASSWORD`.
 
 ## License
 

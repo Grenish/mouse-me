@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+use super::fsutil::set_secret_mode;
 
 pub const DEFAULT_API_BASE: &str = "https://mouse-me-web.vercel.app";
 const API_ENV: &str = "MOUSE_ME_API_URL";
@@ -292,8 +294,94 @@ impl AuthStore {
         Some(user)
     }
 
+    pub fn fetch_text(&self, path: &str) -> Result<(u16, String), String> {
+        if !is_safe_api_path(path) {
+            return Err("Invalid catalog path.".into());
+        }
+        let response = self.request("GET", path, true, None)?;
+        Ok((response.status, response.body))
+    }
+
+    pub fn download_to(&self, path: &str, dest: &Path, max_bytes: u64) -> Result<(), String> {
+        if !is_safe_api_path(path) {
+            return Err("Invalid download path.".into());
+        }
+        let url = format!("{}{path}", self.api_base);
+        let origin_base = origin_of(&self.api_base).unwrap_or_else(|| self.api_base.clone());
+        let mut current = url;
+        for origin in request_origins(&self.api_base) {
+            for _ in 0..5 {
+                let response = self.send_download(&current, &origin)?;
+                if matches!(response.status(), 301 | 302 | 303 | 307 | 308) {
+                    let location = response
+                        .header("location")
+                        .filter(|value| !value.is_empty())
+                        .ok_or_else(|| "Could not follow the download redirect.".to_string())?;
+                    let next = resolve_redirect(&current, location);
+                    if origin_of(&next).as_deref() != Some(origin_base.as_str()) {
+                        return Err("Download redirected off the Mouse Me site.".into());
+                    }
+                    current = next;
+                    continue;
+                }
+                let status = response.status();
+                if !(200..300).contains(&status) {
+                    let body = response.into_string().unwrap_or_default();
+                    return Err(map_download_error(status, &body));
+                }
+                let mut reader = response.into_reader().take(max_bytes.saturating_add(1));
+                if let Some(parent) = dest.parent() {
+                    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                }
+                let mut file = fs::File::create(dest).map_err(|error| error.to_string())?;
+                let copied = io::copy(&mut reader, &mut file).map_err(|error| error.to_string())?;
+                if copied > max_bytes {
+                    let _ = fs::remove_file(dest);
+                    return Err("Pack archive is too large.".into());
+                }
+                if copied == 0 {
+                    let _ = fs::remove_file(dest);
+                    return Err("Pack archive was empty.".into());
+                }
+                return Ok(());
+            }
+        }
+        Err("Could not download the pack.".into())
+    }
+
+    fn send_download(&self, url: &str, origin: &str) -> Result<ureq::Response, String> {
+        let agent = ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(120))
+            .redirects(0)
+            .user_agent(&user_agent())
+            .build();
+        let mut request = agent
+            .get(url)
+            .set("Accept", "*/*")
+            .set("Origin", origin)
+            .set("User-Agent", &user_agent());
+        if let Some(cookie) = self
+            .data
+            .cookie
+            .as_deref()
+            .filter(|cookie| !cookie.is_empty())
+        {
+            request = request.set("Cookie", cookie);
+        }
+        if let Some(token) = self.data.token.as_deref().filter(|token| !token.is_empty()) {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        match request.call() {
+            Ok(response) => Ok(response),
+            Err(ureq::Error::Status(_, response)) => Ok(response),
+            Err(ureq::Error::Transport(error)) => {
+                Err(network_error(&self.api_base, &error.to_string()))
+            }
+        }
+    }
+
     pub fn download_bytes(url: &str) -> Result<Vec<u8>, String> {
-        if !(url.starts_with("https://") || url.starts_with("http://")) {
+        if !is_allowed_avatar_url(url) {
             return Err("Invalid image URL.".into());
         }
         let agent = ureq::AgentBuilder::new()
@@ -370,11 +458,16 @@ impl AuthStore {
         body: Option<&serde_json::Value>,
     ) -> Result<HttpResponse, String> {
         let mut current = url.to_string();
+        let origin_base = origin_of(&self.api_base).unwrap_or_else(|| self.api_base.clone());
         for _ in 0..5 {
             let response = self.send_once(method, &current, origin, send_credentials, body)?;
             if matches!(response.status, 301 | 302 | 303 | 307 | 308) {
                 if let Some(location) = response.location.as_deref().filter(|loc| !loc.is_empty()) {
-                    current = resolve_redirect(&current, location);
+                    let next = resolve_redirect(&current, location);
+                    if origin_of(&next).as_deref() != Some(origin_base.as_str()) {
+                        return Err("Sign-in redirected off the Mouse Me site.".into());
+                    }
+                    current = next;
                     continue;
                 }
             }
@@ -448,6 +541,7 @@ impl AuthStore {
         temporary
             .persist(&self.path)
             .map_err(|error| error.error.to_string())?;
+        set_secret_mode(&self.path)?;
         Ok(())
     }
 }
@@ -687,17 +781,78 @@ fn read_response(response: ureq::Response) -> Result<HttpResponse, String> {
 }
 
 fn request_origins(api_base: &str) -> Vec<String> {
-    let mut origins = vec![api_base.to_string()];
-    for extra in ["http://localhost:3000", "http://127.0.0.1:3000"] {
-        if !origins.iter().any(|origin| origin == extra) {
-            origins.push(extra.to_string());
-        }
+    vec![api_base.to_string()]
+}
+
+fn is_allowed_avatar_url(url: &str) -> bool {
+    if let Some(rest) = url.strip_prefix("https://") {
+        return !rest.is_empty();
     }
-    origins
+    if let Some(rest) = url.strip_prefix("http://") {
+        let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+        let host = host.split(':').next().unwrap_or(host);
+        return host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost");
+    }
+    false
+}
+
+fn origin_of(url: &str) -> Option<String> {
+    let (scheme, rest) = if let Some(rest) = url.strip_prefix("https://") {
+        ("https", rest)
+    } else if let Some(rest) = url.strip_prefix("http://") {
+        ("http", rest)
+    } else {
+        return None;
+    };
+    let host = rest.split(['/', '?', '#']).next()?.trim();
+    if host.is_empty() {
+        return None;
+    }
+    Some(format!("{scheme}://{host}"))
 }
 
 fn is_invalid_origin(body: &str) -> bool {
     body.contains("INVALID_ORIGIN") || body.to_ascii_lowercase().contains("invalid origin")
+}
+
+fn is_safe_api_path(path: &str) -> bool {
+    path.starts_with("/api/")
+        && !path.contains("..")
+        && !path.contains('\\')
+        && path
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '-' | '_' | '.'))
+}
+
+fn map_download_error(status: u16, body: &str) -> String {
+    let parsed: ErrorBody = serde_json::from_str(body).unwrap_or(ErrorBody {
+        code: None,
+        message: None,
+    });
+    if let Some(message) = parsed
+        .message
+        .as_deref()
+        .or(parsed.code.as_deref())
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
+    {
+        if message.chars().count() <= 160 {
+            return message.to_string();
+        }
+    }
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(error) = value.get("error").and_then(|value| value.as_str()) {
+            let error = error.trim();
+            if !error.is_empty() && error.chars().count() <= 160 {
+                return error.to_string();
+            }
+        }
+    }
+    match status {
+        404 => "Pack archive not found or not published.".into(),
+        401 => "Sign in to download that pack.".into(),
+        _ => format!("Could not download the pack (HTTP {status})."),
+    }
 }
 
 fn resolve_redirect(current: &str, location: &str) -> String {
@@ -803,6 +958,21 @@ mod internals {
         let updated =
             merge_cookie_header(&merged, &["better-auth.session_token=xyz; Path=/".into()]);
         assert_eq!(updated, "better-auth.session_token=xyz");
+    }
+
+    #[test]
+    fn origin_stays_on_the_api_host() {
+        assert_eq!(
+            super::origin_of("https://mouse-me-web.vercel.app/api/auth/sign-in/email").as_deref(),
+            Some("https://mouse-me-web.vercel.app")
+        );
+        assert_ne!(
+            super::origin_of("https://mouse-me-web.vercel.app/api"),
+            super::origin_of("https://evil.example/api")
+        );
+        assert!(!super::is_allowed_avatar_url("http://evil.example/a.png"));
+        assert!(super::is_allowed_avatar_url("https://cdn.example/a.png"));
+        assert!(super::is_allowed_avatar_url("http://127.0.0.1:3000/a.png"));
     }
 
     #[test]

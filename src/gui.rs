@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
@@ -13,7 +14,7 @@ use mouse_me::core::importer::{import_cursor_pack, is_safe_theme_name};
 use mouse_me::core::scanner::{get_active_cursor, scan_cursor_themes};
 use mouse_me::core::settings::AppSettings;
 use mouse_me::core::studio::{export_theme, load_png_as_cursor, STUDIO_ROLES};
-use mouse_me::core::types::CursorImage;
+use mouse_me::core::types::{CursorImage, CursorTheme};
 use mouse_me::core::updater::{self, Release};
 
 slint::include_modules!();
@@ -34,13 +35,14 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     let studio_images: Rc<RefCell<HashMap<String, CursorImage>>> =
         Rc::new(RefCell::new(HashMap::new()));
     let studio_role: Rc<RefCell<String>> = Rc::new(RefCell::new("left_ptr".into()));
+    let library_cache: Arc<Mutex<Vec<CursorTheme>>> = Arc::new(Mutex::new(Vec::new()));
 
     let settings = AppSettings::load();
     apply_settings_to_window(&main_window, &settings);
     main_window.set_app_version(SharedString::from(env!("CARGO_PKG_VERSION")));
     apply_saved_session(&main_window);
     refresh_studio_roles(&main_window, &studio_images.borrow());
-    refresh_ui_state(&main_window);
+    rescan_library(&main_window, &library_cache, None, false);
     refresh_device_info_state(&main_window);
     start_auto_update(&main_window);
 
@@ -50,16 +52,13 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
             let name_str = theme_name.as_str().to_string();
             let size_u32 = size.clamp(1, 512) as u32;
             let Some(w) = wh.upgrade() else { return };
-            let settings = read_settings(&w);
-            match apply_with_targets(&name_str, size_u32, &settings.apply_targets()) {
-                Ok(warnings) => mark_theme_applied(&w, &name_str, size_u32, &warnings),
-                Err(e) => set_status(&w, true, e),
-            }
+            apply_theme_async(&w, name_str, size_u32);
         });
     }
 
     {
         let wh = window_handle.clone();
+        let library_cache = library_cache.clone();
         main_window.on_import_theme_dialog(move || {
             let Some(w) = wh.upgrade() else { return };
             let file = rfd::FileDialog::new()
@@ -68,26 +67,28 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 .add_filter("All files", ALL_FILE_EXTENSIONS.as_slice())
                 .pick_file();
             if let Some(path) = file {
-                handle_import(&w, &path);
+                handle_import(&w, &path, &library_cache);
             }
         });
     }
 
     {
         let wh = window_handle.clone();
+        let library_cache = library_cache.clone();
         main_window.on_import_folder_dialog(move || {
             let Some(w) = wh.upgrade() else { return };
             let folder = rfd::FileDialog::new()
                 .set_title("Select unpacked cursor theme folder")
                 .pick_folder();
             if let Some(path) = folder {
-                handle_import(&w, &path);
+                handle_import(&w, &path, &library_cache);
             }
         });
     }
 
     {
         let wh = window_handle.clone();
+        let library_cache = library_cache.clone();
         main_window.on_import_dropped(move |data| {
             let Some(w) = wh.upgrade() else { return };
             let paths = paths_from_transfer(&data);
@@ -100,7 +101,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 return;
             }
             for path in paths {
-                handle_import(&w, &path);
+                handle_import(&w, &path, &library_cache);
             }
         });
     }
@@ -122,6 +123,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         let wh = window_handle.clone();
+        let library_cache = library_cache.clone();
         main_window.on_delete_theme(move |theme_name| {
             let name_str = theme_name.as_str().to_string();
             let Some(w) = wh.upgrade() else { return };
@@ -185,36 +187,34 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 );
             } else {
                 set_status(&w, false, format!("Removed {}", name_str));
-                refresh_ui_state(&w);
+                rescan_library(&w, &library_cache, None, false);
             }
         });
     }
 
     {
         let wh = window_handle.clone();
+        let library_cache = library_cache.clone();
         main_window.on_refresh_themes(move || {
             let Some(w) = wh.upgrade() else { return };
             if w.get_is_loading() {
                 return;
             }
-            w.set_is_loading(true);
-            let wh2 = wh.clone();
-            slint::Timer::single_shot(std::time::Duration::from_millis(40), move || {
-                if let Some(w) = wh2.upgrade() {
-                    refresh_ui_state(&w);
-                    w.set_is_loading(false);
-                    set_status(&w, false, "Library refreshed".into());
-                }
-            });
+            rescan_library(&w, &library_cache, None, true);
         });
     }
 
     {
         let wh = window_handle.clone();
+        let library_cache = library_cache.clone();
         main_window.on_search_changed(move |query| {
             if let Some(w) = wh.upgrade() {
                 w.set_search_query(query);
-                refresh_ui_state(&w);
+                paint_library(
+                    &w,
+                    &library_cache.lock().unwrap_or_else(|e| e.into_inner()),
+                    None,
+                );
             }
         });
     }
@@ -238,10 +238,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
             if settings.apply_size_immediately {
                 let active = w.get_active_theme_name().as_str().to_string();
                 if !active.is_empty() && active != "default" {
-                    match apply_with_targets(&active, size as u32, &settings.apply_targets()) {
-                        Ok(_) => set_status(&w, false, format!("Size set to {}px", size)),
-                        Err(e) => set_status(&w, true, e),
-                    }
+                    apply_theme_async(&w, active, size as u32);
                 } else {
                     set_status(&w, false, format!("Size set to {}px", size));
                 }
@@ -280,6 +277,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         let wh = window_handle.clone();
+        let library_cache = library_cache.clone();
         main_window.on_filter_changed(move || {
             if let Some(w) = wh.upgrade() {
                 let settings = read_settings(&w);
@@ -290,7 +288,11 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         format!("Could not save library filter: {}", error),
                     );
                 }
-                refresh_ui_state(&w);
+                paint_library(
+                    &w,
+                    &library_cache.lock().unwrap_or_else(|e| e.into_inner()),
+                    None,
+                );
             }
         });
     }
@@ -323,16 +325,25 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 return;
             }
-            match apply_hypr_cursor_prefs(
-                settings.enable_hyprcursor,
-                settings.hide_on_key_press,
-                settings.hide_on_touch,
-                settings.no_hardware_cursors,
-                settings.inactive_timeout,
-            ) {
-                Ok(()) => set_status(&w, false, "Hyprland cursor preferences applied".into()),
-                Err(e) => set_status(&w, true, e),
-            }
+            let weak = w.as_weak();
+            std::thread::spawn(move || {
+                let result = apply_hypr_cursor_prefs(
+                    settings.enable_hyprcursor,
+                    settings.hide_on_key_press,
+                    settings.hide_on_touch,
+                    settings.no_hardware_cursors,
+                    settings.inactive_timeout,
+                );
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(w) = weak.upgrade() else { return };
+                    match result {
+                        Ok(()) => {
+                            set_status(&w, false, "Hyprland cursor preferences applied".into())
+                        }
+                        Err(e) => set_status(&w, true, e),
+                    }
+                });
+            });
         });
     }
 
@@ -403,6 +414,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     {
         let wh = window_handle.clone();
         let studio_images = studio_images.clone();
+        let library_cache = library_cache.clone();
         main_window.on_studio_export(move || {
             let Some(w) = wh.upgrade() else { return };
             let name = w.get_studio_name().as_str().to_string();
@@ -415,19 +427,10 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(folder) => {
                     drop(images);
                     set_status(&w, false, format!("Installed {}", folder));
-                    refresh_ui_state(&w);
+                    rescan_library(&w, &library_cache, Some(folder.clone()), false);
                     let settings = read_settings(&w);
                     if settings.auto_apply_on_import {
-                        match apply_with_targets(
-                            &folder,
-                            settings.preferred_size,
-                            &settings.apply_targets(),
-                        ) {
-                            Ok(warnings) => {
-                                mark_theme_applied(&w, &folder, settings.preferred_size, &warnings)
-                            }
-                            Err(error) => set_status(&w, true, error),
-                        }
+                        apply_theme_async(&w, folder, settings.preferred_size);
                     }
                 }
                 Err(e) => set_status(&w, true, e),
@@ -805,7 +808,7 @@ fn read_settings(window: &MainWindow) -> AppSettings {
     }
 }
 
-fn handle_import(window: &MainWindow, path: &Path) {
+fn handle_import(window: &MainWindow, path: &Path, library_cache: &Arc<Mutex<Vec<CursorTheme>>>) {
     if window.get_is_loading() {
         set_status(window, true, "An import is already in progress.".into());
         return;
@@ -815,6 +818,7 @@ fn handle_import(window: &MainWindow, path: &Path) {
     let path = path.to_path_buf();
     let settings = read_settings(window);
     let weak_window = window.as_weak();
+    let library_cache = library_cache.clone();
 
     std::thread::spawn(move || {
         let result = match import_cursor_pack(&path) {
@@ -844,7 +848,7 @@ fn handle_import(window: &MainWindow, path: &Path) {
                 Ok((imported, apply_result)) => {
                     let joined = imported.join(", ");
                     window.set_import_note(SharedString::from(format!("Installed {}.", joined)));
-                    refresh_ui_state(&window);
+                    rescan_library(&window, &library_cache, imported.first().cloned(), false);
                     match (imported.first(), apply_result) {
                         (Some(name), Some(Ok(warnings))) => {
                             mark_theme_applied(
@@ -948,7 +952,6 @@ fn mark_theme_applied(window: &MainWindow, name: &str, size: u32, warnings: &[St
 
     let themes = window.get_themes();
     let Some(model) = themes.as_any().downcast_ref::<VecModel<ThemeItem>>() else {
-        refresh_library(window, Some(name));
         return;
     };
 
@@ -994,22 +997,64 @@ fn reveal_library_item(window: &MainWindow, index: usize) {
     }
 }
 
-fn refresh_ui_state(window: &MainWindow) {
-    refresh_library(window, None);
+fn apply_theme_async(window: &MainWindow, name: String, size: u32) {
+    let settings = read_settings(window);
+    let weak = window.as_weak();
+    std::thread::spawn(move || {
+        let result = apply_with_targets(&name, size, &settings.apply_targets());
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = weak.upgrade() else { return };
+            match result {
+                Ok(warnings) => mark_theme_applied(&window, &name, size, &warnings),
+                Err(error) => set_status(&window, true, error),
+            }
+        });
+    });
 }
 
-fn refresh_library(window: &MainWindow, applied_theme: Option<&str>) {
-    let active_state = get_active_cursor();
+fn rescan_library(
+    window: &MainWindow,
+    cache: &Arc<Mutex<Vec<CursorTheme>>>,
+    applied_theme: Option<String>,
+    announce: bool,
+) {
+    window.set_is_loading(true);
+    let weak = window.as_weak();
+    let cache = cache.clone();
+    std::thread::spawn(move || {
+        let themes = scan_cursor_themes();
+        let active = get_active_cursor();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = weak.upgrade() else { return };
+            *cache.lock().unwrap_or_else(|e| e.into_inner()) = themes;
+            window.set_is_loading(false);
+            paint_library(
+                &window,
+                &cache.lock().unwrap_or_else(|e| e.into_inner()),
+                applied_theme.as_deref(),
+            );
+            if applied_theme.is_none() {
+                window.set_active_theme_name(SharedString::from(&active.theme_name));
+                if window.get_active_size() <= 0 {
+                    window.set_active_size(active.size as i32);
+                }
+            }
+            if announce {
+                set_status(&window, false, "Library refreshed".into());
+            }
+        });
+    });
+}
+
+fn paint_library(window: &MainWindow, all_themes: &[CursorTheme], applied_theme: Option<&str>) {
     let active_name = applied_theme
         .filter(|name| !name.is_empty())
         .map(|name| name.to_string())
-        .unwrap_or(active_state.theme_name);
-    window.set_active_theme_name(SharedString::from(&active_name));
-    if window.get_active_size() <= 0 {
-        window.set_active_size(active_state.size as i32);
+        .unwrap_or_else(|| window.get_active_theme_name().to_string());
+    if !active_name.is_empty() {
+        window.set_active_theme_name(SharedString::from(&active_name));
     }
 
-    let all_themes = scan_cursor_themes();
     let search_q = window.get_search_query().to_lowercase();
     let filter = window.get_library_filter().to_string();
     let type_filter = window.get_library_type().to_string();

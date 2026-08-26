@@ -47,6 +47,16 @@ fn scale_cursor_keeps_matching_size() {
 }
 
 #[test]
+fn load_png_as_cursor_rejects_oversized_image() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("huge.png");
+    let image = image::RgbaImage::new(513, 32);
+    image.save(&path).unwrap();
+    let err = mouse_me::core::studio::load_png_as_cursor(&path).unwrap_err();
+    assert!(err.contains("too large") || err.contains("max"));
+}
+
+#[test]
 fn load_png_as_cursor_reads_pixels() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("frame.png");
