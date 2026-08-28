@@ -1,11 +1,12 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
+use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, Timer, VecModel};
 
 use mouse_me::core::applier::{apply_hypr_cursor_prefs, apply_with_targets};
 use mouse_me::core::auth::{decode_avatar, format_joined, format_published, AuthStore, AuthUser};
@@ -25,10 +26,15 @@ static IMAGE_EXTENSIONS: [&str; 3] = ["png", "jpg", "jpeg"];
 const LIBRARY_CARD_HEIGHT: f32 = 92.0;
 const LIBRARY_CARD_GAP: f32 = 10.0;
 
+const APP_ID: &str = "mouse-me";
+
 pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(error) = updater::apply_pending_update() {
         eprintln!("mouse-me: pending update failed: {error}");
     }
+
+    let _ = slint::set_xdg_app_id(APP_ID);
+    prepare_hyprland_float();
 
     let main_window = MainWindow::new()?;
     let window_handle = main_window.as_weak();
@@ -621,8 +627,62 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    let pid = std::process::id();
+    Timer::single_shot(Duration::from_millis(40), move || {
+        center_floating_hypr_window(pid);
+    });
+
     main_window.run()?;
     Ok(())
+}
+
+fn hyprland_is_running() -> bool {
+    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+}
+
+fn hypr_eval(script: &str) {
+    if !hyprland_is_running() {
+        return;
+    }
+    let _ = Command::new("hyprctl")
+        .args(["eval", script])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+fn prepare_hyprland_float() {
+    hypr_eval(
+        r#"
+        pcall(function()
+            hl.window_rule({
+                name = "mouse-me-float",
+                match = { class = "^(mouse-me)$" },
+                float = true,
+                center = true,
+            })
+        end)
+        pcall(function()
+            hl.window_rule({
+                name = "mouse-me-float-title",
+                match = { title = "^Mouse Me$" },
+                float = true,
+                center = true,
+            })
+        end)
+        "#,
+    );
+}
+
+fn center_floating_hypr_window(pid: u32) {
+    hypr_eval(&format!(
+        r#"
+        pcall(function()
+            hl.dispatch(hl.dsp.window.float({{ action = "set", window = "pid:{pid}" }}))
+            hl.dispatch(hl.dsp.window.center({{ window = "pid:{pid}" }}))
+        end)
+        "#
+    ));
 }
 
 fn apply_saved_session(window: &MainWindow) {
@@ -1028,17 +1088,30 @@ fn rescan_library(
             let Some(window) = weak.upgrade() else { return };
             *cache.lock().unwrap_or_else(|e| e.into_inner()) = themes;
             window.set_is_loading(false);
-            paint_library(
-                &window,
-                &cache.lock().unwrap_or_else(|e| e.into_inner()),
-                applied_theme.as_deref(),
-            );
+            let highlight = applied_theme
+                .clone()
+                .filter(|name| !name.is_empty())
+                .or_else(|| {
+                    let name = active.theme_name.trim();
+                    if name.is_empty() || name.eq_ignore_ascii_case("default") {
+                        None
+                    } else {
+                        Some(name.to_string())
+                    }
+                });
             if applied_theme.is_none() {
-                window.set_active_theme_name(SharedString::from(&active.theme_name));
+                if !active.theme_name.is_empty() {
+                    window.set_active_theme_name(SharedString::from(&active.theme_name));
+                }
                 if window.get_active_size() <= 0 {
                     window.set_active_size(active.size as i32);
                 }
             }
+            paint_library(
+                &window,
+                &cache.lock().unwrap_or_else(|e| e.into_inner()),
+                highlight.as_deref(),
+            );
             if announce {
                 set_status(&window, false, "Library refreshed".into());
             }
