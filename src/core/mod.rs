@@ -1,6 +1,9 @@
 pub mod applier;
 pub mod auth;
+pub mod catalog;
 pub mod device_info;
+pub mod fsutil;
+pub mod images;
 pub mod importer;
 pub mod scanner;
 pub mod settings;

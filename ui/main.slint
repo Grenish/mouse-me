@@ -14,7 +14,7 @@ import {
     Field,
     PreviewSlot,
     MenuSelect,
-    DebugPill,
+    DebugRow,
 } from "theme.slint";
 
 export struct ThemeItem {
@@ -1142,27 +1142,27 @@ export component MainWindow inherits Window {
                                     background: Ink.stroke;
                                 }
 
-                                // --- DEVICE & SYSTEM INFO SECTION ---
                                 VerticalLayout {
                                     spacing: 14px;
 
                                     HorizontalLayout {
-                                        alignment: space-between;
                                         spacing: 12px;
 
                                         VerticalLayout {
                                             spacing: 2px;
                                             alignment: center;
+                                            horizontal-stretch: 1;
                                             Display {
-                                                text: "Device & System Diagnostics";
+                                                text: "This machine";
                                                 font-size: 15px;
                                                 font-weight: 700;
                                                 color: Ink.ivory;
                                             }
                                             Text {
-                                                text: "Hardware and environment details helpful for debugging cursor issues.";
+                                                text: "What Mouse Me sees for the session and the pointer.";
                                                 font-size: 12px;
                                                 color: Ink.mist;
+                                                wrap: word-wrap;
                                             }
                                         }
 
@@ -1171,86 +1171,91 @@ export component MainWindow inherits Window {
                                             alignment: end;
 
                                             FillBtn {
-                                                label: "Refresh info";
+                                                label: "Refresh";
                                                 quiet: true;
-                                                with-icon: true;
-                                                icon: @image-url("../assets/icons/arrow-clockwise.svg");
                                                 clicked => { root.refresh_device_info(); }
                                             }
 
                                             FillBtn {
-                                                label: "Copy debug info";
-                                                with-icon: true;
-                                                icon: @image-url("../assets/icons/info.svg");
+                                                label: "Copy";
+                                                quiet: true;
                                                 clicked => { root.copy_device_info(); }
                                             }
                                         }
                                     }
 
-                                    // Info Grid Box
                                     Rectangle {
                                         border-radius: 16px;
                                         background: Ink.panel;
                                         border-width: 1px;
                                         border-color: Ink.stroke;
 
-                                        VerticalLayout {
-                                            padding: 16px;
-                                            spacing: 10px;
+                                        HorizontalLayout {
+                                            padding: 18px;
+                                            spacing: 28px;
 
-                                            HorizontalLayout {
-                                                spacing: 12px;
-                                                DebugPill {
-                                                    title: "OS / DISTRIBUTION";
+                                            VerticalLayout {
+                                                spacing: 2px;
+                                                horizontal-stretch: 1;
+                                                Display {
+                                                    text: "Session";
+                                                    font-size: 11px;
+                                                    font-weight: 700;
+                                                    color: Ink.mist;
+                                                }
+                                                DebugRow {
+                                                    label: "OS";
                                                     value: root.device_os;
-                                                    horizontal-stretch: 1;
                                                 }
-                                                DebugPill {
-                                                    title: "DESKTOP / COMPOSITOR";
+                                                DebugRow {
+                                                    label: "Desktop";
                                                     value: root.device_desktop;
-                                                    horizontal-stretch: 1;
                                                 }
-                                            }
-
-                                            HorizontalLayout {
-                                                spacing: 12px;
-                                                DebugPill {
-                                                    title: "SESSION & DISPLAY";
+                                                DebugRow {
+                                                    label: "Display";
                                                     value: root.device_session;
-                                                    horizontal-stretch: 1;
                                                 }
-                                                DebugPill {
-                                                    title: "KERNEL & ARCH";
+                                                DebugRow {
+                                                    label: "Kernel";
                                                     value: root.device_kernel;
-                                                    horizontal-stretch: 1;
                                                 }
                                             }
 
-                                            HorizontalLayout {
-                                                spacing: 12px;
-                                                DebugPill {
-                                                    title: "ACTIVE CURSOR THEME";
+                                            Rectangle {
+                                                width: 1px;
+                                                background: Ink.stroke;
+                                            }
+
+                                            VerticalLayout {
+                                                spacing: 2px;
+                                                horizontal-stretch: 1;
+                                                Display {
+                                                    text: "Pointer";
+                                                    font-size: 11px;
+                                                    font-weight: 700;
+                                                    color: Ink.mist;
+                                                }
+                                                DebugRow {
+                                                    label: "Live";
                                                     value: root.device_cursor;
-                                                    horizontal-stretch: 1;
                                                 }
-                                                DebugPill {
-                                                    title: "GTK / GSETTINGS";
+                                                DebugRow {
+                                                    label: "GTK";
                                                     value: root.device_gtk;
-                                                    horizontal-stretch: 1;
                                                 }
-                                            }
-
-                                            HorizontalLayout {
-                                                spacing: 12px;
-                                                DebugPill {
-                                                    title: "QT / KDE THEME";
+                                                DebugRow {
+                                                    label: "Qt";
                                                     value: root.device_qt;
-                                                    horizontal-stretch: 1;
                                                 }
-                                                DebugPill {
-                                                    title: "ENVIRONMENT VARIABLES";
+                                                DebugRow {
+                                                    label: "Env";
                                                     value: root.device_env;
-                                                    horizontal-stretch: 1;
+                                                }
+                                                if root.device_cursor != "" && (root.device_gtk != root.device_cursor || root.device_qt != root.device_cursor): Text {
+                                                    text: "GTK, Qt, and the live pointer are not the same.";
+                                                    font-size: 11px;
+                                                    color: Ink.click;
+                                                    wrap: word-wrap;
                                                 }
                                             }
                                         }

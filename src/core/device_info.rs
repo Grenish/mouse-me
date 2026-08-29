@@ -19,8 +19,10 @@ pub struct DeviceInfo {
 
 pub fn collect_device_info() -> DeviceInfo {
     let os = get_os_pretty_name();
-    let kernel = get_kernel_info();
-    let desktop = get_desktop_environment();
+    let kernel_full = get_kernel_info();
+    let kernel = shorten_kernel(&kernel_full);
+    let desktop_full = get_desktop_environment();
+    let desktop = shorten_desktop(&desktop_full);
     let session = get_session_info();
     let active_cursor = get_active_cursor();
     let cursor = format!("{} ({}px)", active_cursor.theme_name, active_cursor.size);
@@ -41,15 +43,7 @@ pub fn collect_device_info() -> DeviceInfo {
          - **GTK / GSettings:** {}\n\
          - **Qt / KDE Config:** {}\n\
          - **Environment Variables:** {}\n",
-        app_version,
-        os,
-        kernel,
-        desktop,
-        session,
-        cursor,
-        gtk,
-        qt,
-        env_vars
+        app_version, os, kernel_full, desktop_full, session, cursor, gtk, qt, env_vars
     );
 
     DeviceInfo {
@@ -179,7 +173,9 @@ fn get_gtk_cursor_setting() -> String {
         .output()
     {
         if output.status.success() {
-            gsettings_val = String::from_utf8_lossy(&output.stdout).trim().replace('\'', "");
+            gsettings_val = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .replace('\'', "");
         }
     }
 
@@ -253,29 +249,61 @@ fn get_qt_cursor_setting() -> String {
 }
 
 fn get_cursor_env_vars() -> String {
-    let mut parts = Vec::new();
+    let xcursor = std::env::var("XCURSOR_THEME").unwrap_or_default();
+    let hypr = std::env::var("HYPRCURSOR_THEME").unwrap_or_default();
+    let size = std::env::var("XCURSOR_SIZE").unwrap_or_default();
+    format_env_vars(&xcursor, &hypr, &size)
+}
 
-    if let Ok(val) = std::env::var("XCURSOR_THEME") {
-        if !val.is_empty() {
-            parts.push(format!("XCURSOR={}", val));
-        }
+fn format_env_vars(xcursor: &str, hypr: &str, size: &str) -> String {
+    let xcursor = xcursor.trim();
+    let hypr = hypr.trim();
+    let size = size.trim();
+    if xcursor.is_empty() && hypr.is_empty() && size.is_empty() {
+        return "Not set".into();
     }
-    if let Ok(val) = std::env::var("HYPRCURSOR_THEME") {
-        if !val.is_empty() {
-            parts.push(format!("HYPRCURSOR={}", val));
-        }
-    }
-    if let Ok(val) = std::env::var("XCURSOR_SIZE") {
-        if !val.is_empty() {
-            parts.push(format!("SIZE={}", val));
-        }
-    }
-
-    if parts.is_empty() {
-        "Default / None".to_string()
+    let size_part = if size.is_empty() {
+        String::new()
+    } else if size.ends_with("px") {
+        format!(" · {size}")
     } else {
-        parts.join(", ")
+        format!(" · {size}px")
+    };
+    if !xcursor.is_empty() && (hypr.is_empty() || hypr == xcursor) {
+        return format!("{xcursor}{size_part}");
     }
+    if xcursor.is_empty() && !hypr.is_empty() {
+        return format!("{hypr}{size_part}");
+    }
+    format!("XCURSOR {xcursor} · HYPRCURSOR {hypr}{size_part}")
+}
+
+fn shorten_desktop(raw: &str) -> String {
+    let line = raw.lines().next().unwrap_or(raw).trim();
+    let mut parts = line.split_whitespace();
+    let Some(name) = parts.next() else {
+        return raw.to_string();
+    };
+    if name.eq_ignore_ascii_case("Hyprland") {
+        if let Some(version) = parts.next() {
+            if version.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
+                return format!("Hyprland {version}");
+            }
+        }
+        return "Hyprland".into();
+    }
+    line.to_string()
+}
+
+fn shorten_kernel(raw: &str) -> String {
+    let mut parts = raw.split_whitespace();
+    let _sys = parts.next();
+    let release = parts.next().unwrap_or("");
+    let arch = parts.next().unwrap_or("");
+    if !release.is_empty() && !arch.is_empty() {
+        return format!("{release} · {arch}");
+    }
+    raw.to_string()
 }
 
 pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
@@ -333,4 +361,37 @@ pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
     }
 
     Err("Clipboard tool not found (please install wl-copy or xclip)".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_env_vars, shorten_desktop, shorten_kernel};
+
+    #[test]
+    fn hyprland_version_drops_commit_noise() {
+        let raw = "Hyprland 0.56.2 built from branch v0.56.2 at commit efb50993780079460b0cbed1363e2166a2de1d9f clean ([gha] Nix)";
+        assert_eq!(shorten_desktop(raw), "Hyprland 0.56.2");
+        assert_eq!(shorten_desktop("GNOME"), "GNOME");
+    }
+
+    #[test]
+    fn kernel_line_keeps_release_and_arch() {
+        assert_eq!(
+            shorten_kernel("Linux 7.1.8-arch1-3 x86_64"),
+            "7.1.8-arch1-3 · x86_64"
+        );
+    }
+
+    #[test]
+    fn env_line_collapses_matching_themes() {
+        assert_eq!(
+            format_env_vars("modest-light", "modest-light", "24"),
+            "modest-light · 24px"
+        );
+        assert_eq!(
+            format_env_vars("one", "two", "32"),
+            "XCURSOR one · HYPRCURSOR two · 32px"
+        );
+        assert_eq!(format_env_vars("", "", ""), "Not set");
+    }
 }

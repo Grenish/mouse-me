@@ -52,6 +52,41 @@ fn invalid_json_falls_back_to_defaults() {
 }
 
 #[test]
+fn setting_keys_roundtrip() {
+    let mut settings = AppSettings::default();
+    for key in AppSettings::keys() {
+        let value = settings.get_key(key).unwrap();
+        settings.set_key(key, &value).unwrap();
+        assert_eq!(settings.get_key(key).unwrap(), value);
+    }
+}
+
+#[test]
+fn setting_key_parses_aliases_and_rejects_bad_values() {
+    let mut settings = AppSettings::default();
+    assert_eq!(
+        settings.set_key("apply_hyprland", "off").unwrap(),
+        mouse_me::core::settings::SettingEffect::None
+    );
+    assert_eq!(settings.get_key("apply-hyprland").unwrap(), "false");
+    assert_eq!(
+        settings.set_key("enable-hyprcursor", "yes").unwrap(),
+        mouse_me::core::settings::SettingEffect::HyprPrefs
+    );
+    assert!(settings.enable_hyprcursor);
+    assert_eq!(
+        settings.set_key("preferred-size", "48").unwrap(),
+        mouse_me::core::settings::SettingEffect::PreferredSize
+    );
+    assert_eq!(settings.preferred_size, 48);
+    assert!(settings.set_key("preferred-size", "0").is_err());
+    assert!(settings.set_key("auto-update-when", "later").is_err());
+    assert!(settings.set_key("not-a-key", "true").is_err());
+    settings.set_key("auto-update-when", "instantly").unwrap();
+    assert_eq!(settings.auto_update_when, "instantly");
+}
+
+#[test]
 fn missing_auto_update_fields_keep_other_settings() {
     let mut value = serde_json::to_value(AppSettings::default()).unwrap();
     let object = value.as_object_mut().unwrap();

@@ -1,7 +1,10 @@
 mod common;
 
-use mouse_me::core::scanner::{get_icon_directories, scan_cursor_themes, scan_cursor_themes_from};
-use mouse_me::core::types::CursorType;
+use mouse_me::core::scanner::{
+    get_icon_directories, scan_cursor_themes, scan_cursor_themes_from, theme_matches,
+};
+use mouse_me::core::types::{CursorTheme, CursorType};
+use std::path::PathBuf;
 
 #[test]
 fn scan_skips_non_theme_folders_and_default() {
@@ -56,4 +59,41 @@ fn get_icon_directories_has_no_duplicates() {
 #[test]
 fn scan_cursor_themes_does_not_panic() {
     let _ = scan_cursor_themes();
+}
+
+fn sample_theme(name: &str, user: bool, cursor_type: CursorType) -> CursorTheme {
+    CursorTheme {
+        name: name.into(),
+        display_name: format!("{name} Display"),
+        comment: "a comment".into(),
+        cursor_type,
+        path: PathBuf::from("/tmp"),
+        is_user: user,
+        preview_default: None,
+        preview_pointer: None,
+        preview_wait: None,
+        preview_text: None,
+    }
+}
+
+#[test]
+fn theme_matches_filters_scope_type_and_search() {
+    let user = sample_theme("modest-light", true, CursorType::XCursor);
+    let system = sample_theme("Adwaita", false, CursorType::Hyprcursor);
+
+    assert!(theme_matches(&user, true, false, None, ""));
+    assert!(!theme_matches(&system, true, false, None, ""));
+    assert!(theme_matches(&system, false, true, None, ""));
+    assert!(!theme_matches(&user, false, true, None, ""));
+    assert!(theme_matches(
+        &user,
+        false,
+        false,
+        Some("xcursor"),
+        "modest"
+    ));
+    assert!(theme_matches(&user, false, false, Some("XCursor"), ""));
+    assert!(!theme_matches(&user, false, false, Some("hyprcursor"), ""));
+    assert!(theme_matches(&user, false, false, None, "DISPLAY"));
+    assert!(!theme_matches(&user, false, false, None, "nope"));
 }

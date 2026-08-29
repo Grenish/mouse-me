@@ -1,12 +1,14 @@
 use std::collections::HashSet;
 use std::fs::{self, File};
-use std::io::{self, BufReader, Read};
+use std::io::{self, BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use walkdir::WalkDir;
 
 const MAX_ARCHIVE_INPUT_BYTES: u64 = 512 * 1024 * 1024;
-const MAX_EXTRACTED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-const MAX_EXTRACTED_ENTRIES: usize = 100_000;
+const MAX_EXTRACTED_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_EXTRACTED_ENTRIES: usize = 20_000;
+const MAX_COMPRESSION_RATIO: u64 = 100;
+const MAX_SEARCH_DEPTH: usize = 8;
 
 /// Imports a cursor theme archive or directory into ~/.local/share/icons.
 /// Returns a list of imported theme names.
@@ -41,11 +43,9 @@ pub fn import_cursor_pack_into(
     let extract_root = temp_dir.path();
 
     if source_path.is_dir() {
-        // Source is an uncompressed directory
-        copy_dir_all(source_path, extract_root)
+        copy_theme_tree(source_path, extract_root)
             .map_err(|e| format!("Failed to copy source directory: {}", e))?;
     } else {
-        // Source is an archive
         unpack_archive(source_path, extract_root)?;
     }
 
@@ -80,7 +80,7 @@ pub fn import_cursor_pack_into(
             .map_err(|e| format!("Failed to create staging directory: {}", e))?;
         let staged_theme = staging_dir.path().join(&theme_name);
 
-        copy_dir_all(&theme_dir, &staged_theme)
+        copy_theme_tree(&theme_dir, &staged_theme)
             .map_err(|e| format!("Failed to copy theme to '{}': {}", dest.display(), e))?;
 
         // Ensure index.theme exists before replacing a previously installed theme.
@@ -147,7 +147,7 @@ fn detect_archive_kind(archive_path: &Path) -> Option<ArchiveKind> {
     None
 }
 
-/// Unpacks various archive formats into destination
+/// Unpacks various archive formats into destination, entry by entry.
 fn unpack_archive(archive_path: &Path, dest: &Path) -> Result<(), String> {
     let kind = detect_archive_kind(archive_path).ok_or_else(|| {
         format!(
@@ -160,49 +160,252 @@ fn unpack_archive(archive_path: &Path, dest: &Path) -> Result<(), String> {
     })?;
 
     match kind {
-        ArchiveKind::Zip => {
-            let file =
-                File::open(archive_path).map_err(|e| format!("Failed to open zip: {}", e))?;
-            let mut archive =
-                zip::ZipArchive::new(file).map_err(|e| format!("Invalid zip archive: {}", e))?;
-            archive
-                .extract(dest)
-                .map_err(|e| format!("Zip extract error: {}", e))?;
-        }
+        ArchiveKind::Zip => unpack_zip(archive_path, dest),
         ArchiveKind::TarGz => {
             let file =
                 File::open(archive_path).map_err(|e| format!("Failed to open archive: {}", e))?;
-            let gz = flate2::read::GzDecoder::new(BufReader::new(file));
-            tar::Archive::new(gz)
-                .unpack(dest)
-                .map_err(|e| format!("Tar.gz unpack error: {}", e))?;
+            unpack_tar(
+                tar::Archive::new(flate2::read::GzDecoder::new(BufReader::new(file))),
+                dest,
+            )
         }
         ArchiveKind::TarXz => {
             let file =
                 File::open(archive_path).map_err(|e| format!("Failed to open archive: {}", e))?;
-            let xz = xz2::read::XzDecoder::new(BufReader::new(file));
-            tar::Archive::new(xz)
-                .unpack(dest)
-                .map_err(|e| format!("Tar.xz unpack error: {}", e))?;
+            unpack_tar(
+                tar::Archive::new(xz2::read::XzDecoder::new(BufReader::new(file))),
+                dest,
+            )
         }
         ArchiveKind::TarBz2 => {
             let file =
                 File::open(archive_path).map_err(|e| format!("Failed to open archive: {}", e))?;
-            let bz = bzip2::read::BzDecoder::new(BufReader::new(file));
-            tar::Archive::new(bz)
-                .unpack(dest)
-                .map_err(|e| format!("Tar.bz2 unpack error: {}", e))?;
+            unpack_tar(
+                tar::Archive::new(bzip2::read::BzDecoder::new(BufReader::new(file))),
+                dest,
+            )
         }
         ArchiveKind::Tar => {
             let file =
                 File::open(archive_path).map_err(|e| format!("Failed to open archive: {}", e))?;
-            tar::Archive::new(BufReader::new(file))
-                .unpack(dest)
-                .map_err(|e| format!("Tar unpack error: {}", e))?;
+            unpack_tar(tar::Archive::new(BufReader::new(file)), dest)
         }
     }
+}
 
+fn unpack_zip(archive_path: &Path, dest: &Path) -> Result<(), String> {
+    let file = File::open(archive_path).map_err(|e| format!("Failed to open zip: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("Invalid zip archive: {}", e))?;
+    if archive.len() > MAX_EXTRACTED_ENTRIES {
+        return Err(format!(
+            "Archive contains too many entries (maximum is {MAX_EXTRACTED_ENTRIES})"
+        ));
+    }
+    let mut total = 0u64;
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|e| format!("Zip extract error: {}", e))?;
+        if entry.is_symlink() {
+            continue;
+        }
+        let rel = entry
+            .enclosed_name()
+            .ok_or_else(|| "Archive contains an unsafe path.".to_string())?;
+        if !is_safe_rel_path(&rel) {
+            return Err(format!(
+                "Archive contains an unsafe path '{}'",
+                rel.display()
+            ));
+        }
+        let out = dest.join(&rel);
+        if entry.is_dir() {
+            fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+            continue;
+        }
+        let size = entry.size();
+        enforce_ratio(entry.compressed_size(), size)?;
+        total = account_extracted(total, size)?;
+        write_allowed_file(&out, &rel, &mut entry, size)?;
+    }
     Ok(())
+}
+
+fn unpack_tar<R: Read>(mut archive: tar::Archive<R>, dest: &Path) -> Result<(), String> {
+    let mut total = 0u64;
+    let mut entries = 0usize;
+    for entry in archive
+        .entries()
+        .map_err(|e| format!("Tar unpack error: {}", e))?
+    {
+        let mut entry = entry.map_err(|e| format!("Tar unpack error: {}", e))?;
+        entries += 1;
+        if entries > MAX_EXTRACTED_ENTRIES {
+            return Err(format!(
+                "Archive contains too many entries (maximum is {MAX_EXTRACTED_ENTRIES})"
+            ));
+        }
+        let kind = entry.header().entry_type();
+        if kind.is_symlink()
+            || kind.is_hard_link()
+            || kind.is_fifo()
+            || kind.is_block_special()
+            || kind.is_character_special()
+            || kind.is_gnu_sparse()
+        {
+            continue;
+        }
+        let rel = entry
+            .path()
+            .map_err(|e| format!("Tar unpack error: {}", e))?
+            .into_owned();
+        if !is_safe_rel_path(&rel) {
+            return Err(format!(
+                "Archive contains an unsafe path '{}'",
+                rel.display()
+            ));
+        }
+        let out = dest.join(&rel);
+        if kind.is_dir() {
+            fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+            continue;
+        }
+        let size = entry.header().size().unwrap_or(0);
+        total = account_extracted(total, size)?;
+        write_allowed_file(&out, &rel, &mut entry, size)?;
+    }
+    Ok(())
+}
+
+fn write_allowed_file(
+    out: &Path,
+    rel: &Path,
+    reader: &mut impl Read,
+    declared: u64,
+) -> Result<(), String> {
+    if !is_allowed_asset(rel) {
+        return Ok(());
+    }
+    if let Some(parent) = out.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut header = [0u8; 8];
+    let n = read_prefix(reader, &mut header)
+        .map_err(|e| format!("Could not read archive file '{}': {}", rel.display(), e))?;
+    if is_forbidden_payload(&header[..n]) {
+        return Err(format!(
+            "Archive contains an executable payload '{}'",
+            rel.display()
+        ));
+    }
+    let mut file = File::create(out).map_err(|e| e.to_string())?;
+    file.write_all(&header[..n]).map_err(|e| e.to_string())?;
+    let budget = MAX_EXTRACTED_BYTES.min(declared.saturating_add(4096));
+    let copied = io::copy(&mut reader.take(budget), &mut file).map_err(|e| e.to_string())?;
+    if declared > 0 && (n as u64).saturating_add(copied) > declared.saturating_add(16) {
+        return Err(format!(
+            "Archive file '{}' exceeded its declared size",
+            rel.display()
+        ));
+    }
+    Ok(())
+}
+
+fn account_extracted(total: u64, extra: u64) -> Result<u64, String> {
+    let next = total
+        .checked_add(extra)
+        .ok_or("Extracted archive size overflow")?;
+    if extra > MAX_EXTRACTED_BYTES || next > MAX_EXTRACTED_BYTES {
+        return Err(format!(
+            "Extracted archive is too large (maximum is {} MiB)",
+            MAX_EXTRACTED_BYTES / (1024 * 1024)
+        ));
+    }
+    Ok(next)
+}
+
+fn enforce_ratio(compressed: u64, uncompressed: u64) -> Result<(), String> {
+    if compressed > 0
+        && uncompressed > 1024 * 1024
+        && uncompressed / compressed.max(1) > MAX_COMPRESSION_RATIO
+    {
+        return Err("Archive compression ratio is too high.".into());
+    }
+    Ok(())
+}
+
+fn is_safe_rel_path(path: &Path) -> bool {
+    !path.is_absolute()
+        && !path.as_os_str().is_empty()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
+}
+
+fn is_allowed_asset(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if name.is_empty() || name.starts_with('.') {
+        return false;
+    }
+    if matches!(
+        name.as_str(),
+        "index.theme"
+            | "cursor.theme"
+            | "manifest.hl"
+            | "manifest.toml"
+            | "readme"
+            | "readme.md"
+            | "readme.txt"
+            | "license"
+            | "license.md"
+            | "license.txt"
+            | "copying"
+            | "copying.txt"
+    ) {
+        return true;
+    }
+    if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
+        return matches!(
+            ext.to_ascii_lowercase().as_str(),
+            "png"
+                | "svg"
+                | "jpg"
+                | "jpeg"
+                | "webp"
+                | "hl"
+                | "toml"
+                | "theme"
+                | "cursor"
+                | "cur"
+                | "ani"
+                | "ico"
+        );
+    }
+    path.components().any(|component| {
+        component.as_os_str() == "cursors" || component.as_os_str() == "hyprcursors"
+    })
+}
+
+fn is_forbidden_payload(header: &[u8]) -> bool {
+    header.starts_with(&[0x7f, b'E', b'L', b'F'])
+        || header.starts_with(b"MZ")
+        || header.starts_with(b"#!")
+}
+
+fn read_prefix(reader: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
+    let mut n = 0;
+    while n < buf.len() {
+        match reader.read(&mut buf[n..])? {
+            0 => break,
+            got => n += got,
+        }
+    }
+    Ok(n)
 }
 
 fn validate_extracted_tree(root: &Path) -> Result<(), String> {
@@ -265,7 +468,7 @@ fn replace_staged_theme(staged: &Path, dest: &Path, target_root: &Path) -> Resul
 fn find_theme_roots(root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut theme_roots = Vec::new();
 
-    for entry in WalkDir::new(root).max_depth(8).into_iter() {
+    for entry in WalkDir::new(root).max_depth(MAX_SEARCH_DEPTH).into_iter() {
         let entry = entry.map_err(|e| format!("Could not inspect extracted archive: {}", e))?;
         if entry.file_type().is_dir() {
             let p = entry.path();
@@ -359,41 +562,40 @@ fn ensure_index_theme(theme_dir: &Path, name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Recursively copies a directory
-fn copy_dir_all(src: &Path, dst: &Path) -> io::Result<()> {
+fn copy_theme_tree(src: &Path, dst: &Path) -> io::Result<()> {
+    copy_theme_tree_inner(src, dst, Path::new(""))
+}
+
+fn copy_theme_tree_inner(src: &Path, dst: &Path, rel: &Path) -> io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let ty = entry.file_type()?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
+        let child_rel = rel.join(entry.file_name());
 
+        if ty.is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unsafe symlink '{}'", src_path.display()),
+            ));
+        }
         if ty.is_dir() {
-            copy_dir_all(&src_path, &dst_path)?;
-        } else if ty.is_symlink() {
-            let target = fs::read_link(&src_path)?;
-            if !is_safe_relative_link(&target) {
+            copy_theme_tree_inner(&src_path, &dst_path, &child_rel)?;
+        } else if is_allowed_asset(&child_rel) {
+            let mut header = [0u8; 8];
+            let n = read_prefix(&mut File::open(&src_path)?, &mut header)?;
+            if is_forbidden_payload(&header[..n]) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("unsafe symlink target '{}'", target.display()),
+                    format!("executable payload '{}'", src_path.display()),
                 ));
             }
-            std::os::unix::fs::symlink(target, &dst_path)?;
-        } else {
             fs::copy(&src_path, &dst_path)?;
         }
     }
     Ok(())
-}
-
-fn is_safe_relative_link(target: &Path) -> bool {
-    target.is_relative()
-        && !target.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        })
 }
 
 #[cfg(test)]

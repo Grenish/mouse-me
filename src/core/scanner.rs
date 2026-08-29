@@ -54,6 +54,38 @@ pub fn scan_cursor_themes() -> Vec<CursorTheme> {
     scan_cursor_themes_from(&get_icon_directories())
 }
 
+/// CLI/GUI library filter: scope, type, and case-insensitive search.
+pub fn theme_matches(
+    theme: &CursorTheme,
+    user: bool,
+    system: bool,
+    type_filter: Option<&str>,
+    search: &str,
+) -> bool {
+    let scope_ok = match (user, system) {
+        (false, false) | (true, true) => true,
+        (true, false) => theme.is_user,
+        (false, true) => !theme.is_user,
+    };
+    if !scope_ok {
+        return false;
+    }
+
+    if let Some(type_filter) = type_filter {
+        if theme.cursor_type.to_string().to_lowercase() != type_filter.to_lowercase() {
+            return false;
+        }
+    }
+
+    let query = search.trim().to_lowercase();
+    if query.is_empty() {
+        return true;
+    }
+    theme.name.to_lowercase().contains(&query)
+        || theme.display_name.to_lowercase().contains(&query)
+        || theme.comment.to_lowercase().contains(&query)
+}
+
 /// Discovers cursor themes under the given icon directories.
 pub fn scan_cursor_themes_from(search_dirs: &[PathBuf]) -> Vec<CursorTheme> {
     let mut themes = Vec::new();
@@ -238,16 +270,8 @@ fn find_cursor_preview<const N: usize>(
                         let p = entry.path();
                         if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
                             if ext.eq_ignore_ascii_case("png") {
-                                if let Ok(dyn_img) = image::open(&p) {
-                                    let rgba_img = dyn_img.to_rgba8();
-                                    return Some(
-                                        crate::core::types::CursorImage {
-                                            width: rgba_img.width(),
-                                            height: rgba_img.height(),
-                                            rgba: rgba_img.into_raw(),
-                                        }
-                                        .centered_glyph(),
-                                    );
+                                if let Ok(img) = crate::core::images::load_bounded_rgba(&p) {
+                                    return Some(img.centered_glyph());
                                 }
                             }
                         }

@@ -9,3 +9,4 @@ Type=Application
 Categories=Settings;DesktopSettings;Utility;
 Keywords=cursor;mouse;theme;hyprland;omarchy;xcursor;hyprcursor;
 StartupNotify=true
+StartupWMClass=mouse-me

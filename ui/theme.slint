@@ -532,42 +532,35 @@ export component Field inherits Rectangle {
     }
 }
 
-export component DebugPill inherits Rectangle {
-    in property <string> title;
+export component DebugRow inherits Rectangle {
+    in property <string> label;
     in property <string> value;
 
-    border-radius: 10px;
-    background: Ink.well;
-    border-width: 1px;
-    border-color: Ink.stroke;
-    min-height: 52px;
+    min-height: 28px;
+    background: transparent;
 
     HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 14px;
-        padding-top: 8px;
-        padding-bottom: 8px;
-        alignment: space-between;
+        spacing: 12px;
+        padding-top: 6px;
+        padding-bottom: 6px;
 
-        VerticalLayout {
-            spacing: 3px;
-            alignment: center;
+        Display {
+            width: 72px;
+            text: root.label;
+            font-size: 11px;
+            font-weight: 600;
+            color: Ink.mist;
+            vertical-alignment: top;
+        }
+
+        Text {
+            text: root.value != "" ? root.value : "—";
+            font-size: 13px;
+            font-weight: 500;
+            color: Ink.ivory;
+            wrap: word-wrap;
             horizontal-stretch: 1;
-
-            Text {
-                text: root.title;
-                font-size: 10px;
-                font-weight: 600;
-                color: Ink.mist;
-            }
-
-            Text {
-                text: root.value != "" ? root.value : "—";
-                font-size: 12px;
-                font-weight: 600;
-                color: Ink.ivory;
-                overflow: elide;
-            }
+            vertical-alignment: top;
         }
     }
 }

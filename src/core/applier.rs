@@ -3,6 +3,8 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Output};
 
+use super::importer::is_safe_theme_name;
+
 #[derive(Debug, Clone)]
 pub struct ApplyTargets {
     pub hyprland: bool,
@@ -36,6 +38,9 @@ pub fn validate_apply_input(theme: &str, size: u32) -> Result<(), String> {
     }
     if theme.chars().any(|character| character.is_control()) {
         return Err("Cursor theme name cannot contain control characters".into());
+    }
+    if !is_safe_theme_name(theme.trim()) {
+        return Err("Cursor theme name is not a safe directory name".into());
     }
     if size == 0 {
         return Err("Cursor size must be greater than zero".into());
