@@ -242,11 +242,8 @@ struct JsonUpdate {
 }
 
 pub fn handle_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    let launching_gui = matches!(cli.command, Some(Commands::Gui) | None);
-    if !launching_gui {
-        if let Err(error) = updater::apply_pending_update() {
-            eprintln!("mouse-me: pending update failed: {error}");
-        }
+    if let Err(error) = updater::apply_pending_update() {
+        eprintln!("mouse-me: pending update failed: {error}");
     }
 
     match cli.command {
