@@ -193,9 +193,12 @@ pub fn extract_binary(archive: &[u8]) -> Result<Vec<u8>, String> {
         }
         let mut bytes = Vec::new();
         entry
-            .take(MAX_DOWNLOAD_BYTES)
+            .take(MAX_DOWNLOAD_BYTES.saturating_add(1))
             .read_to_end(&mut bytes)
             .map_err(|error| format!("Could not read the update archive: {error}"))?;
+        if bytes.len() as u64 > MAX_DOWNLOAD_BYTES {
+            return Err("Update archive entry is too large.".into());
+        }
         if bytes.is_empty() {
             return Err("The update archive did not contain mouse-me.".into());
         }
@@ -368,8 +371,7 @@ fn http_get_bytes(url: &str) -> Result<Vec<u8>, String> {
 }
 
 fn follow_https_redirect(current: &str, location: Option<&str>) -> Result<String, String> {
-    let location =
-        location.ok_or_else(|| "GitHub redirect was missing a location.".to_string())?;
+    let location = location.ok_or_else(|| "GitHub redirect was missing a location.".to_string())?;
     let next = resolve_https_redirect(current, location)?;
     if !is_allowed_update_url(&next) {
         return Err("GitHub redirected to an untrusted host.".into());
