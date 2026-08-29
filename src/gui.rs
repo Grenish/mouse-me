@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -27,6 +28,8 @@ const LIBRARY_CARD_HEIGHT: f32 = 92.0;
 const LIBRARY_CARD_GAP: f32 = 10.0;
 
 const APP_ID: &str = "mouse-me";
+static APPLY_GENERATION: AtomicU64 = AtomicU64::new(0);
+static APPLY_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(error) = updater::apply_pending_update() {
@@ -1060,9 +1063,19 @@ fn reveal_library_item(window: &MainWindow, index: usize) {
 fn apply_theme_async(window: &MainWindow, name: String, size: u32) {
     let settings = read_settings(window);
     let weak = window.as_weak();
+    let generation = APPLY_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
-        let result = apply_with_targets(&name, size, &settings.apply_targets());
+        let result = {
+            let _guard = APPLY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            if APPLY_GENERATION.load(Ordering::SeqCst) != generation {
+                return;
+            }
+            apply_with_targets(&name, size, &settings.apply_targets())
+        };
         let _ = slint::invoke_from_event_loop(move || {
+            if APPLY_GENERATION.load(Ordering::SeqCst) != generation {
+                return;
+            }
             let Some(window) = weak.upgrade() else { return };
             match result {
                 Ok(warnings) => mark_theme_applied(&window, &name, size, &warnings),
