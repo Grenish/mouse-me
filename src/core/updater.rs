@@ -106,6 +106,9 @@ pub fn apply_pending_update() -> Result<bool, String> {
     }
     if let Err(error) = verify_pending(&pending) {
         let _ = clear_pending();
+        if pending.sha256.is_empty() {
+            return Ok(false);
+        }
         return Err(error);
     }
     let staged = PathBuf::from(&pending.path);
