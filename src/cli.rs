@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use mouse_me::core::applier::{apply_hypr_cursor_prefs, apply_system_wide, apply_with_targets};
-use mouse_me::core::auth::{format_joined, format_published, AuthStore};
+use mouse_me::core::auth::{format_joined, format_published, AuthStore, AuthUser};
 use mouse_me::core::catalog::{
     download_and_import, list_packs, looks_like_filesystem_source, pack_spec, resolve_pack,
 };
@@ -457,11 +457,15 @@ fn cmd_auth(json: bool, action: Option<AuthAction>) -> Result<(), Box<dyn std::e
             let password = require_password(password)?;
             let mut store = AuthStore::load().map_err(fail)?;
             let user = store.sign_in(&email, &password).map_err(fail)?;
-            println!(
-                "Signed in as {} ({})",
-                display_name(&user.name, &user.email),
-                user.email
-            );
+            if json {
+                write_account_json(&store, Some(&user))?;
+            } else {
+                println!(
+                    "Signed in as {} ({})",
+                    display_name(&user.name, &user.email),
+                    user.email
+                );
+            }
         }
         Some(AuthAction::Signup {
             name,
@@ -477,28 +481,46 @@ fn cmd_auth(json: bool, action: Option<AuthAction>) -> Result<(), Box<dyn std::e
             let user = store
                 .create_account(&name, &username, &email, &password, &confirm)
                 .map_err(fail)?;
-            println!(
-                "Account created. Signed in as {} ({})",
-                display_name(&user.name, &user.email),
-                user.email
-            );
+            if json {
+                write_account_json(&store, Some(&user))?;
+            } else {
+                println!(
+                    "Account created. Signed in as {} ({})",
+                    display_name(&user.name, &user.email),
+                    user.email
+                );
+            }
         }
         Some(AuthAction::Logout) => {
             let mut store = AuthStore::load().map_err(fail)?;
             store.sign_out().map_err(fail)?;
-            println!("Signed out.");
+            if json {
+                write_account_json(&store, None)?;
+            } else {
+                println!("Signed out.");
+            }
         }
         Some(AuthAction::Refresh) => {
             let mut store = AuthStore::load().map_err(fail)?;
             match store.refresh().map_err(fail)? {
                 Some(user) => {
-                    println!(
-                        "Session refreshed. Signed in as {} ({})",
-                        display_name(&user.name, &user.email),
-                        user.email
-                    );
+                    if json {
+                        write_account_json(&store, Some(&user))?;
+                    } else {
+                        println!(
+                            "Session refreshed. Signed in as {} ({})",
+                            display_name(&user.name, &user.email),
+                            user.email
+                        );
+                    }
                 }
-                None => println!("Not signed in."),
+                None => {
+                    if json {
+                        write_account_json(&store, None)?;
+                    } else {
+                        println!("Not signed in.");
+                    }
+                }
             }
         }
     }
@@ -513,37 +535,13 @@ fn cmd_whoami(json: bool) -> Result<(), Box<dyn std::error::Error>> {
     };
     let Some(user) = user else {
         if json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&JsonAccount {
-                    signed_in: false,
-                    name: None,
-                    username: None,
-                    email: None,
-                    joined: None,
-                    published: None,
-                    profile_url: None,
-                })?
-            );
-            return Ok(());
+            return write_account_json(&store, None);
         }
         return Err(fail("Not signed in."));
     };
 
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&JsonAccount {
-                signed_in: true,
-                name: Some(user.name.clone()),
-                username: Some(user.username.clone()),
-                email: Some(user.email.clone()),
-                joined: user.created_at.as_deref().map(format_joined),
-                published: Some(format_published(user.published_count)),
-                profile_url: store.profile_url(),
-            })?
-        );
-        return Ok(());
+        return write_account_json(&store, Some(&user));
     }
 
     let label = if !user.username.is_empty() {
@@ -557,6 +555,34 @@ fn cmd_whoami(json: bool) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn write_account_json(
+    store: &AuthStore,
+    user: Option<&AuthUser>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let payload = match user {
+        Some(user) => JsonAccount {
+            signed_in: true,
+            name: Some(user.name.clone()),
+            username: Some(user.username.clone()),
+            email: Some(user.email.clone()),
+            joined: user.created_at.as_deref().map(format_joined),
+            published: Some(format_published(user.published_count)),
+            profile_url: store.profile_url(),
+        },
+        None => JsonAccount {
+            signed_in: false,
+            name: None,
+            username: None,
+            email: None,
+            joined: None,
+            published: None,
+            profile_url: None,
+        },
+    };
+    println!("{}", serde_json::to_string_pretty(&payload)?);
+    Ok(())
+}
+
 fn print_account(json: bool) -> Result<(), Box<dyn std::error::Error>> {
     let mut store = AuthStore::load().map_err(fail)?;
     let user = match store.refresh() {
@@ -565,28 +591,7 @@ fn print_account(json: bool) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if json {
-        let payload = match user {
-            Some(user) => JsonAccount {
-                signed_in: true,
-                name: Some(user.name.clone()),
-                username: Some(user.username.clone()),
-                email: Some(user.email.clone()),
-                joined: user.created_at.as_deref().map(format_joined),
-                published: Some(format_published(user.published_count)),
-                profile_url: store.profile_url(),
-            },
-            None => JsonAccount {
-                signed_in: false,
-                name: None,
-                username: None,
-                email: None,
-                joined: None,
-                published: None,
-                profile_url: None,
-            },
-        };
-        println!("{}", serde_json::to_string_pretty(&payload)?);
-        return Ok(());
+        return write_account_json(&store, user.as_ref());
     }
 
     let Some(user) = user else {
