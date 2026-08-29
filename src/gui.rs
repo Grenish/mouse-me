@@ -62,7 +62,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
             let name_str = theme_name.as_str().to_string();
             let size_u32 = size.clamp(1, 512) as u32;
             let Some(w) = wh.upgrade() else { return };
-            apply_theme_async(&w, name_str, size_u32);
+            apply_theme_async(&w, name_str, size_u32, None);
         });
     }
 
@@ -248,7 +248,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
             if settings.apply_size_immediately {
                 let active = w.get_active_theme_name().as_str().to_string();
                 if !active.is_empty() && active != "default" {
-                    apply_theme_async(&w, active, size as u32);
+                    apply_theme_async(&w, active, size as u32, None);
                 } else {
                     set_status(&w, false, format!("Size set to {}px", size));
                 }
@@ -437,10 +437,11 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(folder) => {
                     drop(images);
                     set_status(&w, false, format!("Installed {}", folder));
-                    rescan_library(&w, &library_cache, Some(folder.clone()), false);
                     let settings = read_settings(&w);
                     if settings.auto_apply_on_import {
-                        apply_theme_async(&w, folder, settings.preferred_size);
+                        apply_theme_async(&w, folder, settings.preferred_size, Some(&library_cache));
+                    } else {
+                        rescan_library(&w, &library_cache, None, false);
                     }
                 }
                 Err(e) => set_status(&w, true, e),
@@ -1061,9 +1062,15 @@ fn reveal_library_item(window: &MainWindow, index: usize) {
     }
 }
 
-fn apply_theme_async(window: &MainWindow, name: String, size: u32) {
+fn apply_theme_async(
+    window: &MainWindow,
+    name: String,
+    size: u32,
+    rescan: Option<&Arc<Mutex<Vec<CursorTheme>>>>,
+) {
     let settings = read_settings(window);
     let weak = window.as_weak();
+    let rescan = rescan.cloned();
     let generation = APPLY_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
         let result = {
@@ -1079,8 +1086,18 @@ fn apply_theme_async(window: &MainWindow, name: String, size: u32) {
             }
             let Some(window) = weak.upgrade() else { return };
             match result {
-                Ok(warnings) => mark_theme_applied(&window, &name, size, &warnings),
-                Err(error) => set_status(&window, true, error),
+                Ok(warnings) => {
+                    mark_theme_applied(&window, &name, size, &warnings);
+                    if let Some(cache) = rescan {
+                        rescan_library(&window, &cache, Some(name), false);
+                    }
+                }
+                Err(error) => {
+                    set_status(&window, true, error);
+                    if let Some(cache) = rescan {
+                        rescan_library(&window, &cache, None, false);
+                    }
+                }
             }
         });
     });
