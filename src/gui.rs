@@ -29,6 +29,7 @@ const LIBRARY_CARD_GAP: f32 = 10.0;
 
 const APP_ID: &str = "mouse-me";
 static APPLY_GENERATION: AtomicU64 = AtomicU64::new(0);
+static SCAN_GENERATION: AtomicU64 = AtomicU64::new(0);
 static APPLY_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
@@ -1094,10 +1095,14 @@ fn rescan_library(
     window.set_is_loading(true);
     let weak = window.as_weak();
     let cache = cache.clone();
+    let generation = SCAN_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
         let themes = scan_cursor_themes();
         let active = get_active_cursor();
         let _ = slint::invoke_from_event_loop(move || {
+            if SCAN_GENERATION.load(Ordering::SeqCst) != generation {
+                return;
+            }
             let Some(window) = weak.upgrade() else { return };
             *cache.lock().unwrap_or_else(|e| e.into_inner()) = themes;
             window.set_is_loading(false);
