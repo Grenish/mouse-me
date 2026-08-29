@@ -291,8 +291,7 @@ fn write_allowed_file(
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let mut header = [0u8; 8];
-    let n = reader
-        .read(&mut header)
+    let n = read_prefix(reader, &mut header)
         .map_err(|e| format!("Could not read archive file '{}': {}", rel.display(), e))?;
     if is_forbidden_payload(&header[..n]) {
         return Err(format!(
@@ -396,6 +395,17 @@ fn is_forbidden_payload(header: &[u8]) -> bool {
     header.starts_with(&[0x7f, b'E', b'L', b'F'])
         || header.starts_with(b"MZ")
         || header.starts_with(b"#!")
+}
+
+fn read_prefix(reader: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
+    let mut n = 0;
+    while n < buf.len() {
+        match reader.read(&mut buf[n..])? {
+            0 => break,
+            got => n += got,
+        }
+    }
+    Ok(n)
 }
 
 fn validate_extracted_tree(root: &Path) -> Result<(), String> {
@@ -575,7 +585,7 @@ fn copy_theme_tree_inner(src: &Path, dst: &Path, rel: &Path) -> io::Result<()> {
             copy_theme_tree_inner(&src_path, &dst_path, &child_rel)?;
         } else if is_allowed_asset(&child_rel) {
             let mut header = [0u8; 8];
-            let n = File::open(&src_path)?.read(&mut header)?;
+            let n = read_prefix(&mut File::open(&src_path)?, &mut header)?;
             if is_forbidden_payload(&header[..n]) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
