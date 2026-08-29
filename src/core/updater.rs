@@ -336,14 +336,7 @@ fn http_get_bytes(url: &str) -> Result<Vec<u8>, String> {
             Err(ureq::Error::Status(code, response))
                 if matches!(code, 301 | 302 | 303 | 307 | 308) =>
             {
-                let location = response
-                    .header("location")
-                    .ok_or_else(|| "GitHub redirect was missing a location.".to_string())?;
-                let next = resolve_https_redirect(&current, location)?;
-                if !is_allowed_update_url(&next) {
-                    return Err("GitHub redirected to an untrusted host.".into());
-                }
-                current = next;
+                current = follow_https_redirect(&current, response.header("location"))?;
                 continue;
             }
             Err(ureq::Error::Status(code, _)) => {
@@ -353,6 +346,10 @@ fn http_get_bytes(url: &str) -> Result<Vec<u8>, String> {
                 return Err(format!("Could not reach GitHub: {error}"));
             }
         };
+        if matches!(response.status(), 301 | 302 | 303 | 307 | 308) {
+            current = follow_https_redirect(&current, response.header("location"))?;
+            continue;
+        }
         if !(200..300).contains(&response.status()) {
             if response.status() == 404 {
                 return Err("no-release".into());
@@ -368,6 +365,16 @@ fn http_get_bytes(url: &str) -> Result<Vec<u8>, String> {
         return Ok(bytes);
     }
     Err("Too many redirects while downloading the update.".into())
+}
+
+fn follow_https_redirect(current: &str, location: Option<&str>) -> Result<String, String> {
+    let location =
+        location.ok_or_else(|| "GitHub redirect was missing a location.".to_string())?;
+    let next = resolve_https_redirect(current, location)?;
+    if !is_allowed_update_url(&next) {
+        return Err("GitHub redirected to an untrusted host.".into());
+    }
+    Ok(next)
 }
 
 fn resolve_https_redirect(current: &str, location: &str) -> Result<String, String> {
