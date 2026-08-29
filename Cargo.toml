@@ -44,4 +44,6 @@ slint-build = "1.9"
 tempfile = "3.12"
 image = { version = "0.25", default-features = false, features = ["png"] }
 zip = "2.2"
+tar = "0.4"
+flate2 = "1.0"
 serde_json = "1.0"

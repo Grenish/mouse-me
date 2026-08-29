@@ -128,3 +128,84 @@ fn import_zip_skips_shell_payload_and_installs_theme() {
     assert!(!installed.join("install.sh").exists());
     assert!(!installed.join("Windows").join("Install.inf").exists());
 }
+
+fn elf_bytes() -> Vec<u8> {
+    let mut elf = vec![0u8; 516];
+    elf[..4].copy_from_slice(&[0x7f, b'E', b'L', b'F']);
+    elf
+}
+
+#[test]
+fn import_zip_rejects_elf_disguised_as_cursor() {
+    let workspace = tempfile::tempdir().unwrap();
+    let zip_path = workspace.path().join("elf.zip");
+    let elf = elf_bytes();
+    common::write_zip(
+        &zip_path,
+        &[
+            ("demo/", b""),
+            ("demo/cursors/", b""),
+            ("demo/cursors/left_ptr", elf.as_slice()),
+        ],
+    );
+    let dest = tempfile::tempdir().unwrap();
+    let err = import_cursor_pack_into(&zip_path, dest.path()).unwrap_err();
+    assert!(
+        err.contains("executable payload"),
+        "expected an executable-payload rejection, got: {err}"
+    );
+}
+
+#[test]
+fn import_zip_rejects_shebang_disguised_as_png() {
+    let workspace = tempfile::tempdir().unwrap();
+    let zip_path = workspace.path().join("shebang.zip");
+    common::write_zip(
+        &zip_path,
+        &[
+            ("demo/", b""),
+            ("demo/cursors/", b""),
+            ("demo/cursors/left_ptr", b"cursor"),
+            ("demo/evil.png", b"#!/bin/sh\necho pwned\n"),
+        ],
+    );
+    let dest = tempfile::tempdir().unwrap();
+    let err = import_cursor_pack_into(&zip_path, dest.path()).unwrap_err();
+    assert!(
+        err.contains("executable payload"),
+        "expected an executable-payload rejection, got: {err}"
+    );
+}
+
+#[test]
+fn import_tar_gz_rejects_elf_disguised_as_cursor() {
+    let workspace = tempfile::tempdir().unwrap();
+    let archive = workspace.path().join("elf.tar.gz");
+    let elf = elf_bytes();
+    common::write_tar_gz(&archive, &[("demo/cursors/left_ptr", elf.as_slice())]);
+    let dest = tempfile::tempdir().unwrap();
+    let err = import_cursor_pack_into(&archive, dest.path()).unwrap_err();
+    assert!(
+        err.contains("executable payload"),
+        "expected an executable-payload rejection, got: {err}"
+    );
+}
+
+#[test]
+fn import_tar_gz_rejects_shebang_disguised_as_png() {
+    let workspace = tempfile::tempdir().unwrap();
+    let archive = workspace.path().join("shebang.tar.gz");
+    common::write_tar_gz(
+        &archive,
+        &[
+            ("demo/cursors/left_ptr", b"cursor"),
+            ("demo/evil.png", b"#!/bin/sh\necho pwned\n"),
+        ],
+    );
+    let dest = tempfile::tempdir().unwrap();
+    let err = import_cursor_pack_into(&archive, dest.path()).unwrap_err();
+    assert!(
+        err.contains("executable payload"),
+        "expected an executable-payload rejection, got: {err}"
+    );
+}

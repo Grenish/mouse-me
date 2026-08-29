@@ -53,3 +53,21 @@ pub fn write_zip(path: &Path, entries: &[(&str, &[u8])]) {
     }
     zip.finish().unwrap();
 }
+
+pub fn write_tar_gz(path: &Path, entries: &[(&str, &[u8])]) {
+    let mut tar_bytes = Vec::new();
+    {
+        let mut builder = tar::Builder::new(&mut tar_bytes);
+        for (name, bytes) in entries {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_cksum();
+            builder.append_data(&mut header, *name, *bytes).unwrap();
+        }
+        builder.finish().unwrap();
+    }
+    let file = fs::File::create(path).unwrap();
+    let mut encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+    encoder.write_all(&tar_bytes).unwrap();
+    encoder.finish().unwrap();
+}
