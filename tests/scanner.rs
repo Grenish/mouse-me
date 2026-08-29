@@ -92,6 +92,7 @@ fn theme_matches_filters_scope_type_and_search() {
         Some("xcursor"),
         "modest"
     ));
+    assert!(theme_matches(&user, false, false, Some("XCursor"), ""));
     assert!(!theme_matches(&user, false, false, Some("hyprcursor"), ""));
     assert!(theme_matches(&user, false, false, None, "DISPLAY"));
     assert!(!theme_matches(&user, false, false, None, "nope"));

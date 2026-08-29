@@ -72,7 +72,7 @@ pub fn theme_matches(
     }
 
     if let Some(type_filter) = type_filter {
-        if theme.cursor_type.to_string().to_lowercase() != type_filter {
+        if theme.cursor_type.to_string().to_lowercase() != type_filter.to_lowercase() {
             return false;
         }
     }
