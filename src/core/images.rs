@@ -10,6 +10,9 @@ pub const MAX_IMAGE_FILE_BYTES: u64 = 8 * 1024 * 1024;
 
 pub fn load_bounded_rgba(path: &Path) -> Result<CursorImage, String> {
     let meta = fs::metadata(path).map_err(|error| format!("Could not read image: {error}"))?;
+    if !meta.is_file() {
+        return Err("Image path is not a regular file".into());
+    }
     if meta.len() > MAX_IMAGE_FILE_BYTES {
         return Err(format!(
             "Image is too large (maximum is {} MiB)",
@@ -54,5 +57,12 @@ mod tests {
         image.save(&path).unwrap();
         let err = load_bounded_rgba(&path).unwrap_err();
         assert!(err.contains("too large") || err.contains("max"));
+    }
+
+    #[test]
+    fn rejects_non_regular_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = load_bounded_rgba(dir.path()).unwrap_err();
+        assert!(err.contains("regular file"));
     }
 }
