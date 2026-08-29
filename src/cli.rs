@@ -931,7 +931,7 @@ fn prompt(label: &str, secret: bool) -> Result<String, Box<dyn std::error::Error
     stderr.flush()?;
 
     if secret {
-        stty_echo(false);
+        stty_echo(false)?;
         let _restore = EchoRestore;
         let line = read_tty_line().or_else(|_| read_stdin_line())?;
         drop(_restore);
@@ -948,25 +948,27 @@ struct EchoRestore;
 
 impl Drop for EchoRestore {
     fn drop(&mut self) {
-        stty_echo(true);
+        let _ = stty_echo(true);
     }
 }
 
-fn stty_echo(enable: bool) {
-    let Ok(tty) = fs::OpenOptions::new()
+fn stty_echo(enable: bool) -> io::Result<()> {
+    let tty = fs::OpenOptions::new()
         .read(true)
         .write(true)
-        .open("/dev/tty")
-    else {
-        return;
-    };
+        .open("/dev/tty")?;
     let arg = if enable { "echo" } else { "-echo" };
-    let _ = Command::new("stty")
+    let status = Command::new("stty")
         .arg(arg)
         .stdin(tty)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status();
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other("Could not change terminal echo"))
+    }
 }
 
 fn read_tty_line() -> io::Result<String> {
