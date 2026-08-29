@@ -72,7 +72,10 @@ fn import_zip_rejects_path_traversal() {
     common::write_zip(&zip_path, &[("../escape", b"owned")]);
     let dest = tempfile::tempdir().unwrap();
     let err = import_cursor_pack_into(&zip_path, dest.path()).unwrap_err();
-    assert!(err.to_lowercase().contains("unsafe") || err.contains("No valid cursor theme"));
+    assert!(
+        err.to_lowercase().contains("unsafe"),
+        "expected an unsafe-path rejection, got: {err}"
+    );
     assert!(!dest.path().join("escape").exists());
     assert!(!workspace.path().join("escape").exists());
 }
