@@ -439,7 +439,12 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     set_status(&w, false, format!("Installed {}", folder));
                     let settings = read_settings(&w);
                     if settings.auto_apply_on_import {
-                        apply_theme_async(&w, folder, settings.preferred_size, Some(&library_cache));
+                        apply_theme_async(
+                            &w,
+                            folder,
+                            settings.preferred_size,
+                            Some(&library_cache),
+                        );
                     } else {
                         rescan_library(&w, &library_cache, None, false);
                     }
@@ -881,25 +886,11 @@ fn handle_import(window: &MainWindow, path: &Path, library_cache: &Arc<Mutex<Vec
 
     window.set_is_loading(true);
     let path = path.to_path_buf();
-    let settings = read_settings(window);
     let weak_window = window.as_weak();
     let library_cache = library_cache.clone();
 
     std::thread::spawn(move || {
-        let result = match import_cursor_pack(&path) {
-            Err(error) => Err(error),
-            Ok(imported) => {
-                let apply_result = if settings.auto_apply_on_import {
-                    imported.first().map(|name| {
-                        apply_with_targets(name, settings.preferred_size, &settings.apply_targets())
-                    })
-                } else {
-                    None
-                };
-                Ok((imported, apply_result))
-            }
-        };
-
+        let result = import_cursor_pack(&path);
         let _ = slint::invoke_from_event_loop(move || {
             let Some(window) = weak_window.upgrade() else {
                 return;
@@ -910,21 +901,24 @@ fn handle_import(window: &MainWindow, path: &Path, library_cache: &Arc<Mutex<Vec
                     window.set_import_note(SharedString::from(error.clone()));
                     set_status(&window, true, error);
                 }
-                Ok((imported, apply_result)) => {
+                Ok(imported) => {
                     let joined = imported.join(", ");
                     window.set_import_note(SharedString::from(format!("Installed {}.", joined)));
-                    rescan_library(&window, &library_cache, imported.first().cloned(), false);
-                    match (imported.first(), apply_result) {
-                        (Some(name), Some(Ok(warnings))) => {
-                            mark_theme_applied(
+                    let settings = read_settings(&window);
+                    if settings.auto_apply_on_import {
+                        if let Some(name) = imported.first().cloned() {
+                            apply_theme_async(
                                 &window,
                                 name,
-                                read_settings(&window).preferred_size,
-                                &warnings,
+                                settings.preferred_size,
+                                Some(&library_cache),
                             );
+                        } else {
+                            rescan_library(&window, &library_cache, None, false);
                         }
-                        (_, Some(Err(error))) => set_status(&window, true, error),
-                        _ => set_status(&window, false, format!("Installed {}", joined)),
+                    } else {
+                        rescan_library(&window, &library_cache, None, false);
+                        set_status(&window, false, format!("Installed {}", joined));
                     }
                 }
             }
