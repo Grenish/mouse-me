@@ -808,6 +808,15 @@ fn origin_of(url: &str) -> Option<String> {
     if host.is_empty() {
         return None;
     }
+    let host = host.to_ascii_lowercase();
+    let host = match scheme {
+        "https" => host.strip_suffix(":443").unwrap_or(&host).to_string(),
+        "http" => host.strip_suffix(":80").unwrap_or(&host).to_string(),
+        _ => host,
+    };
+    if host.is_empty() {
+        return None;
+    }
     Some(format!("{scheme}://{host}"))
 }
 
@@ -965,6 +974,10 @@ mod internals {
         assert_eq!(
             super::origin_of("https://mouse-me-web.vercel.app/api/auth/sign-in/email").as_deref(),
             Some("https://mouse-me-web.vercel.app")
+        );
+        assert_eq!(
+            super::origin_of("https://Mouse-Me-Web.vercel.app/api"),
+            super::origin_of("https://mouse-me-web.vercel.app:443/api")
         );
         assert_ne!(
             super::origin_of("https://mouse-me-web.vercel.app/api"),
