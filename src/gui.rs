@@ -11,6 +11,7 @@ use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, 
 
 use mouse_me::core::applier::{apply_hypr_cursor_prefs, apply_with_targets};
 use mouse_me::core::auth::{decode_avatar, format_joined, format_published, AuthStore, AuthUser};
+use mouse_me::core::bar::{self, BarHost, BarPaths};
 use mouse_me::core::device_info::{collect_device_info, copy_to_clipboard};
 use mouse_me::core::importer::{import_cursor_pack, is_safe_theme_name};
 use mouse_me::core::scanner::{get_active_cursor, scan_cursor_themes};
@@ -54,6 +55,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     refresh_studio_roles(&main_window, &studio_images.borrow());
     rescan_library(&main_window, &library_cache, None, false);
     refresh_device_info_state(&main_window);
+    paint_bar_library(&main_window);
     start_auto_update(&main_window);
 
     {
@@ -276,11 +278,116 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
                 if page == 3 {
+                    paint_bar_library(&w);
+                }
+                if page == 4 {
                     refresh_device_info_state(&w);
                 }
-                if page == 4 && w.get_auth_signed_in() {
+                if page == 5 && w.get_auth_signed_in() {
                     refresh_profile(&w);
                 }
+            }
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_save_bar_profile(move || {
+            let Some(w) = wh.upgrade() else { return };
+            let name = w.get_bar_draft_name().to_string();
+            match bar::save_from_live(&BarPaths::from_env(), &name) {
+                Ok(id) => {
+                    paint_bar_library(&w);
+                    set_status(&w, false, format!("Saved bar '{id}'"));
+                }
+                Err(error) => set_status(&w, true, error),
+            }
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_new_empty_bar(move || {
+            let Some(w) = wh.upgrade() else { return };
+            let name = w.get_bar_draft_name().to_string();
+            match bar::new_empty(&BarPaths::from_env(), &name) {
+                Ok(id) => {
+                    paint_bar_library(&w);
+                    set_status(&w, false, format!("Created empty bar '{id}'"));
+                }
+                Err(error) => set_status(&w, true, error),
+            }
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_apply_bar_profile(move |id| {
+            let Some(w) = wh.upgrade() else { return };
+            match bar::apply_profile(&BarPaths::from_env(), id.as_str()) {
+                Ok(()) => {
+                    paint_bar_library(&w);
+                    set_status(&w, false, format!("Applied {}", id.as_str()));
+                }
+                Err(error) => set_status(&w, true, error),
+            }
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_delete_bar_profile(move |id| {
+            let Some(w) = wh.upgrade() else { return };
+            match bar::remove_profile(&BarPaths::from_env(), id.as_str()) {
+                Ok(()) => {
+                    paint_bar_library(&w);
+                    set_status(&w, false, format!("Removed {}", id.as_str()));
+                }
+                Err(error) => set_status(&w, true, error),
+            }
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_duplicate_bar_profile(move |id| {
+            let Some(w) = wh.upgrade() else { return };
+            let draft = w.get_bar_draft_name().to_string();
+            let name = if draft.trim().is_empty() || draft.trim() == id.as_str() {
+                format!("{} copy", id.as_str())
+            } else {
+                draft
+            };
+            match bar::duplicate_profile(&BarPaths::from_env(), id.as_str(), &name) {
+                Ok(new_id) => {
+                    paint_bar_library(&w);
+                    set_status(&w, false, format!("Duplicated as '{new_id}'"));
+                }
+                Err(error) => set_status(&w, true, error),
+            }
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_restore_bar(move || {
+            let Some(w) = wh.upgrade() else { return };
+            match bar::restore_backup(&BarPaths::from_env()) {
+                Ok(()) => {
+                    paint_bar_library(&w);
+                    set_status(&w, false, "Restored the previous live bar".into());
+                }
+                Err(error) => set_status(&w, true, error),
+            }
+        });
+    }
+
+    {
+        let wh = window_handle.clone();
+        main_window.on_refresh_bars(move || {
+            if let Some(w) = wh.upgrade() {
+                paint_bar_library(&w);
+                set_status(&w, false, "Bar library refreshed".into());
             }
         });
     }
@@ -846,7 +953,7 @@ fn apply_settings_to_window(window: &MainWindow, settings: &AppSettings) {
     window.set_inactive_timeout(settings.inactive_timeout);
     window.set_auto_update(settings.auto_update);
     window.set_auto_update_when(settings.auto_update_when_index());
-    window.set_page(settings.last_page.clamp(0, 5));
+    window.set_page(settings.last_page.clamp(0, 6));
     window.set_active_size(settings.preferred_size as i32);
 }
 
@@ -1054,6 +1161,42 @@ fn reveal_library_item(window: &MainWindow, index: usize) {
     if (next - current).abs() > 0.5 {
         window.set_library_viewport_y(next);
     }
+}
+
+fn paint_bar_library(window: &MainWindow) {
+    let paths = BarPaths::from_env();
+    let host = bar::detect_host(&paths);
+    window.set_bar_host_ok(host == BarHost::OmarchyShell);
+    window.set_bar_host_note(SharedString::from(bar::host_message(&host)));
+    window.set_bar_can_restore(bar::backup_exists(&paths));
+    if host != BarHost::OmarchyShell {
+        window.set_bar_profiles(ModelRc::from(Rc::new(VecModel::<BarProfileItem>::from(
+            Vec::new(),
+        ))));
+        return;
+    }
+    let rows = match bar::list_profiles(&paths) {
+        Ok(rows) => rows,
+        Err(error) => {
+            set_status(window, true, error);
+            Vec::new()
+        }
+    };
+    let items: Vec<BarProfileItem> = rows
+        .into_iter()
+        .map(|row| BarProfileItem {
+            id: SharedString::from(row.id),
+            display_name: SharedString::from(row.display_name),
+            source: SharedString::from(row.source),
+            is_applied: row.is_applied,
+            is_live: row.is_live,
+            is_deletable: row.is_deletable,
+            left: SharedString::from(row.left),
+            center: SharedString::from(row.center),
+            right: SharedString::from(row.right),
+        })
+        .collect();
+    window.set_bar_profiles(ModelRc::from(Rc::new(VecModel::from(items))));
 }
 
 fn apply_theme_async(

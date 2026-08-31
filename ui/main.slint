@@ -39,6 +39,18 @@ export struct StudioRole {
     assigned: bool,
 }
 
+export struct BarProfileItem {
+    id: string,
+    display_name: string,
+    source: string,
+    is_applied: bool,
+    is_live: bool,
+    is_deletable: bool,
+    left: string,
+    center: string,
+    right: string,
+}
+
 export component MainWindow inherits Window {
     title: "Mouse Me";
     min-width: 1080px;
@@ -126,6 +138,11 @@ export component MainWindow inherits Window {
     in-out property <string> device_gtk: "";
     in-out property <string> device_qt: "";
     in-out property <string> device_env: "";
+    in-out property <bool> bar_host_ok: false;
+    in-out property <string> bar_host_note: "Looking for an Omarchy menubar…";
+    in-out property <string> bar_draft_name: "My bar";
+    in-out property <bool> bar_can_restore: false;
+    in-out property <[BarProfileItem]> bar_profiles: [];
 
     callback apply_theme(string, int);
     callback import_theme_dialog();
@@ -159,6 +176,13 @@ export component MainWindow inherits Window {
     callback sign_out();
     callback open_forgot_password();
     callback open_account_page();
+    callback save_bar_profile();
+    callback new_empty_bar();
+    callback apply_bar_profile(string);
+    callback delete_bar_profile(string);
+    callback duplicate_bar_profile(string);
+    callback restore_bar();
+    callback refresh_bars();
 
     function go(p: int) {
         root.page = p;
@@ -176,14 +200,16 @@ export component MainWindow inherits Window {
     property <string> page-title: root.page == 0 ? "Library"
         : root.page == 1 ? "Import"
         : root.page == 2 ? "Studio"
-        : root.page == 3 ? "About"
-        : root.page == 4 ? (root.auth_signed_in ? "Profile" : (root.auth_creating ? "Create account" : "Sign in"))
+        : root.page == 3 ? "Bar"
+        : root.page == 4 ? "About"
+        : root.page == 5 ? (root.auth_signed_in ? "Profile" : (root.auth_creating ? "Create account" : "Sign in"))
         : "Settings";
     property <string> page-sub: root.page == 0 ? "Every pointer installed on this machine."
         : root.page == 1 ? "Install a pack from an archive or a folder."
         : root.page == 2 ? "Build an XCursor theme from PNG frames."
-        : root.page == 3 ? "What Mouse Me is, and where it lives on disk."
-        : root.page == 4 ? (root.auth_signed_in ? (root.auth_session_username != "" ? "@" + root.auth_session_username : "Your Mouse Me account.") : (root.auth_creating ? "This is the same account as the Mouse Me website." : "Use the email and password from the Mouse Me website."))
+        : root.page == 3 ? "Save named Omarchy menubars and switch them on Apply."
+        : root.page == 4 ? "What Mouse Me is, and where it lives on disk."
+        : root.page == 5 ? (root.auth_signed_in ? (root.auth_session_username != "" ? "@" + root.auth_session_username : "Your Mouse Me account.") : (root.auth_creating ? "This is the same account as the Mouse Me website." : "Use the email and password from the Mouse Me website."))
         : "Where the pointer is applied, and how it behaves.";
     property <string> sidebar-user-label: !root.auth_signed_in ? "User"
         : (root.auth_session_name != "" ? root.auth_session_name : (root.auth_session_username != "" ? root.auth_session_username : "User"));
@@ -263,10 +289,17 @@ export component MainWindow inherits Window {
                 }
 
                 NavBtn {
-                    icon: @image-url("../assets/icons/info.svg");
-                    label: "About";
+                    icon: @image-url("../assets/icons/squares-four.svg");
+                    label: "Bar";
                     active: root.page == 3;
                     clicked => { root.go(3); }
+                }
+
+                NavBtn {
+                    icon: @image-url("../assets/icons/info.svg");
+                    label: "About";
+                    active: root.page == 4;
+                    clicked => { root.go(4); }
                 }
 
                 Rectangle {
@@ -280,15 +313,15 @@ export component MainWindow inherits Window {
                     signed-in: root.auth_signed_in;
                     has-photo: root.auth_has_avatar;
                     photo: root.auth_avatar;
-                    active: root.page == 4;
-                    clicked => { root.go(4); }
+                    active: root.page == 5;
+                    clicked => { root.go(5); }
                 }
 
                 NavBtn {
                     icon: @image-url("../assets/icons/gear.svg");
                     label: "Settings";
-                    active: root.page == 5;
-                    clicked => { root.go(5); }
+                    active: root.page == 6;
+                    clicked => { root.go(6); }
                 }
             }
         }
@@ -330,7 +363,7 @@ export component MainWindow inherits Window {
                         }
                     }
 
-                    if root.page != 4: VerticalLayout {
+                    if root.page != 3 && root.page != 4: VerticalLayout {
                         alignment: center;
                         FillBtn {
                             label: "Refresh";
@@ -993,6 +1026,205 @@ export component MainWindow inherits Window {
                 }
 
                 if root.page == 3: VerticalLayout {
+                    spacing: 14px;
+                    vertical-stretch: 1;
+
+                    Text {
+                        text: root.bar_host_note;
+                        font-size: 13px;
+                        color: Ink.mist;
+                        wrap: word-wrap;
+                    }
+
+                    if !root.bar_host_ok: Rectangle {
+                        vertical-stretch: 1;
+                        border-radius: 20px;
+                        background: Ink.well;
+                        border-width: 1px;
+                        border-color: Ink.stroke;
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 10px;
+                            padding: 32px;
+                            Display {
+                                text: "Bar profiles need Omarchy";
+                                font-size: 16px;
+                                font-weight: 700;
+                                color: Ink.ivory;
+                                horizontal-alignment: center;
+                            }
+                            Text {
+                                text: "This page saves and switches ~/.config/omarchy/shell.json. It does not edit a Waybar CSS config.";
+                                font-size: 13px;
+                                color: Ink.mist;
+                                horizontal-alignment: center;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+
+                    if root.bar_host_ok: HorizontalLayout {
+                        height: 36px;
+                        spacing: 8px;
+                        Field {
+                            width: 220px;
+                            placeholder: "Name this bar…";
+                            value <=> root.bar_draft_name;
+                        }
+                        FillBtn {
+                            label: "Save current";
+                            clicked => { root.save_bar_profile(); }
+                        }
+                        FillBtn {
+                            label: "New empty";
+                            quiet: true;
+                            clicked => { root.new_empty_bar(); }
+                        }
+                        if root.bar_can_restore: FillBtn {
+                            label: "Restore previous";
+                            quiet: true;
+                            clicked => { root.restore_bar(); }
+                        }
+                        Rectangle { horizontal-stretch: 1; height: 36px; background: transparent; }
+                        FillBtn {
+                            label: "Refresh";
+                            quiet: true;
+                            clicked => { root.refresh_bars(); }
+                        }
+                    }
+
+                    if root.bar_host_ok: ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            spacing: 10px;
+                            padding-right: 8px;
+
+                            for item in root.bar_profiles: Rectangle {
+                                height: 96px;
+                                border-radius: 18px;
+                                border-width: 1px;
+                                border-color: item.is_applied ? Ink.sage : Ink.stroke;
+                                background: item.is_applied ? #1E4F3428 : Ink.well;
+
+                                HorizontalLayout {
+                                    width: 100%;
+                                    height: 100%;
+                                    padding: 12px;
+                                    spacing: 14px;
+
+                                    Rectangle {
+                                        width: 280px;
+                                        vertical-stretch: 1;
+                                        border-radius: 14px;
+                                        background: Ink.parchment;
+
+                                        HorizontalLayout {
+                                            width: 100%;
+                                            height: 100%;
+                                            padding: 10px;
+                                            spacing: 8px;
+                                            alignment: stretch;
+
+                                            VerticalLayout {
+                                                alignment: center;
+                                                horizontal-stretch: 1;
+                                                Text {
+                                                    text: item.left == "" ? "—" : item.left;
+                                                    font-size: 10px;
+                                                    color: #5C6B52;
+                                                    overflow: elide;
+                                                    horizontal-alignment: left;
+                                                }
+                                            }
+                                            Rectangle { width: 1px; background: #5C6B5233; }
+                                            VerticalLayout {
+                                                alignment: center;
+                                                horizontal-stretch: 1;
+                                                Text {
+                                                    text: item.center == "" ? "—" : item.center;
+                                                    font-size: 10px;
+                                                    color: #5C6B52;
+                                                    overflow: elide;
+                                                    horizontal-alignment: center;
+                                                }
+                                            }
+                                            Rectangle { width: 1px; background: #5C6B5233; }
+                                            VerticalLayout {
+                                                alignment: center;
+                                                horizontal-stretch: 1;
+                                                Text {
+                                                    text: item.right == "" ? "—" : item.right;
+                                                    font-size: 10px;
+                                                    color: #5C6B52;
+                                                    overflow: elide;
+                                                    horizontal-alignment: right;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        spacing: 5px;
+                                        alignment: center;
+                                        horizontal-stretch: 1;
+                                        Display {
+                                            text: item.display_name;
+                                            font-size: 15px;
+                                            font-weight: 700;
+                                            color: Ink.ivory;
+                                            overflow: elide;
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 6px;
+                                            if item.is_live: Tag {
+                                                label: "Live";
+                                                fill: #C9845A33;
+                                                ink: Ink.click;
+                                            }
+                                            if item.is_applied && !item.is_live: Tag {
+                                                label: "Applied";
+                                                fill: #C9845A33;
+                                                ink: Ink.click;
+                                            }
+                                            if !item.is_live: Tag {
+                                                label: item.source;
+                                            }
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            if item.is_deletable: FillBtn {
+                                                label: "Remove";
+                                                quiet: true;
+                                                danger: true;
+                                                clicked => { root.delete_bar_profile(item.id); }
+                                            }
+                                            if item.is_deletable: FillBtn {
+                                                label: "Duplicate";
+                                                quiet: true;
+                                                clicked => { root.duplicate_bar_profile(item.id); }
+                                            }
+                                            if !item.is_live: FillBtn {
+                                                label: item.is_applied ? "Applied" : "Apply";
+                                                quiet: item.is_applied;
+                                                clicked => {
+                                                    if !item.is_applied {
+                                                        root.apply_bar_profile(item.id);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if root.page == 4: VerticalLayout {
                     spacing: 16px;
                     vertical-stretch: 1;
 
@@ -1266,7 +1498,7 @@ export component MainWindow inherits Window {
                     }
                 }
 
-                if root.page == 4: VerticalLayout {
+                if root.page == 5: VerticalLayout {
                     spacing: 16px;
                     vertical-stretch: 1;
 
@@ -1529,7 +1761,7 @@ export component MainWindow inherits Window {
                     }
                 }
 
-                if root.page == 5: ScrollView {
+                if root.page == 6: ScrollView {
                     vertical-stretch: 1;
                     VerticalLayout {
                         spacing: 14px;

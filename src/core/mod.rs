@@ -1,5 +1,6 @@
 pub mod applier;
 pub mod auth;
+pub mod bar;
 pub mod catalog;
 pub mod device_info;
 pub mod fsutil;
