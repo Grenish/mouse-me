@@ -15,6 +15,10 @@ import {
     PreviewSlot,
     MenuSelect,
     DebugRow,
+    GlyphBtn,
+    SectionLabel,
+    SegmentBtn,
+    Segments,
 } from "theme.slint";
 
 export struct ThemeItem {
@@ -36,7 +40,17 @@ export struct ThemeItem {
 export struct StudioRole {
     id: string,
     label: string,
+    hint: string,
+    group: string,
+    first: bool,
     assigned: bool,
+    frames: int,
+    thumb: image,
+}
+
+export struct StudioSize {
+    px: int,
+    on: bool,
 }
 
 export component MainWindow inherits Window {
@@ -87,15 +101,25 @@ export component MainWindow inherits Window {
 
     in-out property <string> studio_name: "Custom Pointer";
     in-out property <string> studio_comment: "";
-    in-out property <int> studio_size: 32;
+    in-out property <[StudioRole]> studio_roles: [];
+    in-out property <string> studio_selected_role: "left_ptr";
+    in-out property <string> studio_role_label: "Default";
+    in-out property <string> studio_role_hint: "";
+    in-out property <[image]> studio_frames: [];
+    in-out property <int> studio_frame_index: 0;
+    in-out property <int> studio_edge: 32;
     in-out property <int> studio_hotspot_x: 0;
     in-out property <int> studio_hotspot_y: 0;
-    in-out property <int> studio_img_w: 32;
-    in-out property <int> studio_img_h: 32;
-    in-out property <image> studio_preview;
-    in-out property <bool> studio_has_preview: false;
-    in-out property <string> studio_selected_role: "left_ptr";
-    in-out property <[StudioRole]> studio_roles: [];
+    in-out property <int> studio_delay: 80;
+    in-out property <[StudioSize]> studio_sizes: [];
+    in-out property <bool> studio_fill_missing: true;
+    in-out property <int> studio_assigned: 0;
+    in-out property <int> studio_canvas_bg: 0;
+    in-out property <image> studio_mat_tile;
+    in-out property <string> studio_coverage_note: "";
+    in-out property <string> studio_folder: "";
+    in-out property <[string]> studio_theme_choices: [];
+    in-out property <int> studio_open_index: 0;
     in-out property <string> import_note: "Drop a zip, tar.gz, tar.xz, or an unpacked theme folder.";
     in-out property <string> app_version: "0.1.0";
     in-out property <string> update_note: "";
@@ -131,7 +155,7 @@ export component MainWindow inherits Window {
     callback import_theme_dialog();
     callback import_folder_dialog();
     callback import_dropped(data-transfer);
-    callback studio_file_dropped(data-transfer);
+    callback studio_files_dropped(data-transfer);
     callback delete_theme(string);
     callback refresh_themes();
     callback search_changed(string);
@@ -140,10 +164,21 @@ export component MainWindow inherits Window {
     callback filter_changed();
     callback settings_changed();
     callback hypr_prefs_changed();
-    callback studio_pick_image();
+    callback studio_pick_frames(bool);
     callback studio_select_role(string);
+    callback studio_select_frame(int);
+    callback studio_remove_frame();
+    callback studio_move_frame(int);
+    callback studio_clear_role();
+    callback studio_fill_empty();
     callback studio_set_hotspot(float, float);
-    callback studio_use_for_all();
+    callback studio_nudge_hotspot(int, int);
+    callback studio_auto_hotspot();
+    callback studio_set_delay(int);
+    callback studio_toggle_size(int);
+    callback studio_meta_changed();
+    callback studio_open_theme(int);
+    callback studio_new_project();
     callback studio_export();
     callback open_themes_folder();
     callback check_for_update();
@@ -181,7 +216,7 @@ export component MainWindow inherits Window {
         : "Settings";
     property <string> page-sub: root.page == 0 ? "Every pointer installed on this machine."
         : root.page == 1 ? "Install a pack from an archive or a folder."
-        : root.page == 2 ? "Build an XCursor theme from PNG frames."
+        : root.page == 2 ? "Make a cursor theme from your own PNG art."
         : root.page == 3 ? "What Mouse Me is, and where it lives on disk."
         : root.page == 4 ? (root.auth_signed_in ? (root.auth_session_username != "" ? "@" + root.auth_session_username : "Your Mouse Me account.") : (root.auth_creating ? "This is the same account as the Mouse Me website." : "Use the email and password from the Mouse Me website."))
         : "Where the pointer is applied, and how it behaves.";
@@ -723,8 +758,9 @@ export component MainWindow inherits Window {
                     spacing: 14px;
                     vertical-stretch: 1;
 
+                    // Roles: grouped by what the pointer is doing.
                     Rectangle {
-                        width: 200px;
+                        width: 212px;
                         border-radius: 18px;
                         background: Ink.well;
                         border-width: 1px;
@@ -733,73 +769,150 @@ export component MainWindow inherits Window {
                         VerticalLayout {
                             width: 100%;
                             height: 100%;
-                            padding: 12px;
-                            spacing: 6px;
-                            Display {
-                                text: "Roles";
-                                font-size: 11px;
-                                font-weight: 700;
-                                color: Ink.mist;
+                            padding: 14px;
+                            padding-bottom: 12px;
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                Display {
+                                    text: "Roles";
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    color: Ink.ivory;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: root.studio_assigned + " of " + root.studio_roles.length + " have art";
+                                    font-size: 12px;
+                                    color: Ink.mist;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            Rectangle {
+                                height: 4px;
+                                border-radius: 2px;
+                                background: Ink.stroke;
+                                Rectangle {
+                                    x: 0;
+                                    y: 0;
+                                    height: 100%;
+                                    width: root.studio_roles.length == 0 ? 0px : parent.width * root.studio_assigned / root.studio_roles.length;
+                                    border-radius: 2px;
+                                    background: Ink.sage;
+                                }
+                            }
+
+                            Text {
+                                text: root.studio_coverage_note;
+                                font-size: 12px;
+                                color: Ink.fog;
+                                wrap: word-wrap;
                             }
 
                             ScrollView {
                                 vertical-stretch: 1;
                                 VerticalLayout {
-                                    spacing: 4px;
-                                    for role in root.studio_roles: Rectangle {
-                                        height: 34px;
-                                        border-radius: 10px;
-                                        background: role.id == root.studio_selected_role ? #1E4F3455 : (rtouch.has-hover ? Ink.ghost : #00000000);
+                                    padding-right: 6px;
+                                    spacing: 2px;
 
-                                        HorizontalLayout {
-                                            width: 100%;
-                                            height: 100%;
-                                            padding-left: 10px;
-                                            padding-right: 10px;
-                                            spacing: 8px;
-                                            VerticalLayout {
-                                                alignment: center;
-                                                vertical-stretch: 1;
-                                                Rectangle {
-                                                    width: 7px;
-                                                    height: 7px;
-                                                    border-radius: 4px;
-                                                    background: role.assigned ? Ink.sage : Ink.stroke-strong;
+                                    for role in root.studio_roles: VerticalLayout {
+                                        spacing: 2px;
+
+                                        if role.first: Text {
+                                            height: 30px;
+                                            text: role.group;
+                                            font-size: 12px;
+                                            color: Ink.mist;
+                                            vertical-alignment: bottom;
+                                        }
+
+                                        role-row := Rectangle {
+                                            property <bool> selected: role.id == root.studio_selected_role;
+                                            height: 40px;
+                                            border-radius: 10px;
+                                            background: self.selected ? #FFFFFF17 : (row.has-hover ? Ink.ghost : #00000000);
+
+                                            HorizontalLayout {
+                                                padding-left: 6px;
+                                                padding-right: 10px;
+                                                spacing: 10px;
+
+                                                VerticalLayout {
+                                                    alignment: center;
+                                                    Rectangle {
+                                                        width: 28px;
+                                                        height: 28px;
+                                                        border-radius: 7px;
+                                                        background: role.assigned ? #1D3A28 : #00000000;
+                                                        border-width: role.assigned ? 0px : 1px;
+                                                        border-color: Ink.stroke-strong;
+                                                        if role.assigned: Image {
+                                                            x: 3px;
+                                                            y: 3px;
+                                                            width: 22px;
+                                                            height: 22px;
+                                                            source: role.thumb;
+                                                            image-fit: contain;
+                                                        }
+                                                    }
+                                                }
+
+                                                Text {
+                                                    text: role.label;
+                                                    font-size: 13px;
+                                                    font-weight: role-row.selected ? 600 : 400;
+                                                    color: role.assigned || role-row.selected ? Ink.ivory : Ink.fog;
+                                                    vertical-alignment: center;
+                                                    horizontal-stretch: 1;
+                                                    overflow: elide;
+                                                }
+
+                                                Text {
+                                                    text: role.frames > 1 ? role.frames + " frames" : (role.assigned ? "" : "—");
+                                                    font-size: 11px;
+                                                    color: Ink.mist;
+                                                    vertical-alignment: center;
                                                 }
                                             }
 
-                                            Text {
-                                                text: role.label;
-                                                font-size: 12px;
-                                                font-weight: role.id == root.studio_selected_role ? 700 : 500;
-                                                color: Ink.ivory;
-                                                vertical-alignment: center;
-                                                horizontal-stretch: 1;
-                                                height: 100%;
+                                            row := TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.studio_select_role(role.id); }
                                             }
-                                        }
-
-                                        rtouch := TouchArea {
-                                            mouse-cursor: pointer;
-                                            clicked => { root.studio_select_role(role.id); }
                                         }
                                     }
                                 }
                             }
+
+                            FillBtn {
+                                label: "Fill empty roles";
+                                quiet: true;
+                                clicked => { root.studio_fill_empty(); }
+                            }
                         }
                     }
 
+                    // The mat: the one place this screen spends its colour.
                     Rectangle {
                         horizontal-stretch: 1;
                         border-radius: 18px;
-                        background: Ink.well;
-                        border-width: 1px;
-                        border-color: Ink.stroke;
+                        background: #16301F;
+                        clip: true;
+
+                        Image {
+                            width: 100%;
+                            height: 100%;
+                            source: root.studio_mat_tile;
+                            horizontal-tiling: repeat;
+                            vertical-tiling: repeat;
+                        }
 
                         studio_drop := DropArea {
                             can-drop(event) => { return DragAction.copy; }
                             dropped(event) => {
-                                root.studio_file_dropped(event.data);
+                                root.studio_files_dropped(event.data);
                                 return DragAction.copy;
                             }
 
@@ -809,106 +922,506 @@ export component MainWindow inherits Window {
                                 padding: 18px;
                                 spacing: 12px;
 
-                                Display {
-                                    text: "Hotspot canvas  ·  click to set the tip";
-                                    font-size: 11px;
-                                    font-weight: 700;
-                                    color: Ink.mist;
-                                }
-
-                                Rectangle {
-                                    vertical-stretch: 1;
-                                    border-radius: 16px;
-                                    background: Ink.parchment;
-                                    clip: true;
-
-                                    property <length> image-width: max(1, root.studio_img_w) * 1px;
-                                    property <length> image-height: max(1, root.studio_img_h) * 1px;
-                                    property <float> image-scale: min(self.width / image-width, self.height / image-height);
-                                    property <length> displayed-width: image-width * image-scale;
-                                    property <length> displayed-height: image-height * image-scale;
-                                    property <length> image-left: (self.width - displayed-width) / 2;
-                                    property <length> image-top: (self.height - displayed-height) / 2;
-
-                                    if root.studio_has_preview: Image {
-                                        source: root.studio_preview;
-                                        width: 100%;
-                                        height: 100%;
-                                        image-fit: contain;
-                                    }
-                                    if !root.studio_has_preview: VerticalLayout {
-                                        alignment: center;
-                                        spacing: 8px;
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 3px;
                                         Display {
-                                            text: studio_drop.has-drag ? "Drop PNG onto this role" : "No frame on this role";
-                                            font-size: 14px;
-                                            font-weight: 700;
-                                            color: #4D5C46;
-                                            horizontal-alignment: center;
+                                            text: root.studio_role_label;
+                                            font-size: 20px;
+                                            font-weight: 600;
+                                            color: Ink.ivory;
                                         }
-
                                         Text {
-                                            text: "Pick a PNG, or drop one here.";
+                                            text: root.studio_role_hint;
                                             font-size: 12px;
-                                            color: #6A7A62;
-                                            horizontal-alignment: center;
+                                            color: #B9CDB8;
+                                            wrap: word-wrap;
                                         }
                                     }
-
-                                    if root.studio_has_preview: Rectangle {
-                                        x: image-left + root.studio_hotspot_x * image-scale * 1px - 8px;
-                                        y: image-top + root.studio_hotspot_y * image-scale * 1px - 8px;
-                                        width: 16px;
-                                        height: 16px;
-                                        border-radius: 8px;
-                                        border-width: 2px;
-                                        border-color: Ink.click;
-                                        background: #C9845A55;
-                                    }
-
-                                    canvas_touch := TouchArea {
-                                        clicked => {
-                                            if root.studio_has_preview {
-                                                root.studio_set_hotspot(
-                                                    max(0.0, min(1.0, (self.mouse-x - image-left) / max(1px, displayed-width))),
-                                                    max(0.0, min(1.0, (self.mouse-y - image-top) / max(1px, displayed-height))));
-                                            } else {
-                                                root.studio_pick_image();
+                                    VerticalLayout {
+                                        alignment: start;
+                                        Segments {
+                                            SegmentBtn {
+                                                label: "Mat";
+                                                active: root.studio_canvas_bg == 0;
+                                                clicked => { root.studio_canvas_bg = 0; }
+                                            }
+                                            SegmentBtn {
+                                                label: "Light";
+                                                active: root.studio_canvas_bg == 1;
+                                                clicked => { root.studio_canvas_bg = 1; }
+                                            }
+                                            SegmentBtn {
+                                                label: "Dark";
+                                                active: root.studio_canvas_bg == 2;
+                                                clicked => { root.studio_canvas_bg = 2; }
                                             }
                                         }
                                     }
                                 }
 
-                                HorizontalLayout {
-                                    height: 36px;
-                                    spacing: 8px;
-                                    FillBtn {
-                                        label: "Choose PNG";
-                                        clicked => { root.studio_pick_image(); }
-                                    }
+                                stage := Rectangle {
+                                    vertical-stretch: 1;
+                                    min-height: 160px;
 
-                                    FillBtn {
-                                        label: "Use on every role";
-                                        quiet: true;
-                                        clicked => { root.studio_use_for_all(); }
-                                    }
+                                    property <length> ruler: 28px;
+                                    property <bool> has-frame: root.studio_frames.length > 0;
+                                    property <int> edge: max(1, root.studio_edge);
+                                    property <length> side: max(64px, min(self.width - self.ruler - 6px, self.height - self.ruler - 6px));
+                                    property <length> cell: self.side / self.edge;
+                                    property <length> board-x: self.ruler + (self.width - self.ruler - self.side) / 2;
+                                    property <length> board-y: self.ruler + (self.height - self.ruler - self.side) / 2;
+                                    property <int> major: self.cell * 8 >= 30px ? 8 : (self.cell * 16 >= 30px ? 16 : (self.cell * 32 >= 30px ? 32 : 64));
+                                    property <int> minor: self.cell >= 5px ? 1 : (self.cell * 2 >= 5px ? 2 : (self.cell * 4 >= 5px ? 4 : 8));
+                                    property <bool> pointing: self.has-frame && board-touch.has-hover;
+                                    property <int> hover-x: Math.max(0, Math.min(self.edge - 1, Math.floor(board-touch.mouse-x / self.cell)));
+                                    property <int> hover-y: Math.max(0, Math.min(self.edge - 1, Math.floor(board-touch.mouse-y / self.cell)));
+                                    property <color> ruler-ink: #A3C2A4;
 
-                                    Text {
-                                        text: "Hotspot  " + root.studio_hotspot_x + " × " + root.studio_hotspot_y;
+                                    // Ruler ticks along the top and left edges.
+                                    for i in Math.floor(stage.edge / stage.minor) + 1: Rectangle {
+                                        property <int> at: i * stage.minor;
+                                        property <bool> big: Math.mod(self.at, stage.major) == 0;
+                                        x: stage.board-x + self.at * stage.cell;
+                                        y: stage.board-y - 4px - self.height;
+                                        width: 1px;
+                                        height: self.big ? 9px : 4px;
+                                        background: self.big ? stage.ruler-ink : #A3C2A455;
+                                    }
+                                    for i in Math.floor(stage.edge / stage.minor) + 1: Rectangle {
+                                        property <int> at: i * stage.minor;
+                                        property <bool> big: Math.mod(self.at, stage.major) == 0;
+                                        x: stage.board-x - 4px - self.width;
+                                        y: stage.board-y + self.at * stage.cell;
+                                        width: self.big ? 9px : 4px;
+                                        height: 1px;
+                                        background: self.big ? stage.ruler-ink : #A3C2A455;
+                                    }
+                                    for i in Math.ceil(stage.edge / stage.major): Text {
+                                        x: stage.board-x + i * stage.major * stage.cell + 3px;
+                                        y: stage.board-y - 26px;
+                                        height: 14px;
+                                        text: i * stage.major;
                                         font-size: 11px;
-                                        color: Ink.mist;
-                                        vertical-alignment: center;
-                                        horizontal-stretch: 1;
+                                        color: stage.ruler-ink;
+                                    }
+                                    for i in Math.ceil(stage.edge / stage.major): Text {
+                                        x: stage.board-x - 28px;
+                                        y: stage.board-y + i * stage.major * stage.cell + 1px;
+                                        width: 22px;
+                                        height: 14px;
+                                        text: i * stage.major;
+                                        font-size: 11px;
+                                        color: stage.ruler-ink;
                                         horizontal-alignment: right;
-                                        height: 100%;
+                                    }
+
+                                    // The board.
+                                    Rectangle {
+                                        x: stage.board-x;
+                                        y: stage.board-y;
+                                        width: stage.side;
+                                        height: stage.side;
+                                        border-radius: 4px;
+                                        clip: true;
+                                        background: root.studio_canvas_bg == 1 ? Ink.parchment : (root.studio_canvas_bg == 2 ? #0B0F0A : #1D3A28);
+
+                                        if stage.has-frame: Image {
+                                            width: 100%;
+                                            height: 100%;
+                                            source: root.studio_frames[root.studio_frame_index];
+                                            image-fit: fill;
+                                            image-rendering: pixelated;
+                                        }
+
+                                        if stage.cell >= 8px: Rectangle {
+                                            width: 100%;
+                                            height: 100%;
+                                            property <color> line: root.studio_canvas_bg == 1 ? #0000001A : #FFFFFF10;
+                                            for i in stage.edge + 1: Rectangle {
+                                                x: i * stage.cell;
+                                                y: 0;
+                                                width: 1px;
+                                                height: 100%;
+                                                background: parent.line;
+                                            }
+                                            for i in stage.edge + 1: Rectangle {
+                                                x: 0;
+                                                y: i * stage.cell;
+                                                width: 100%;
+                                                height: 1px;
+                                                background: parent.line;
+                                            }
+                                        }
+
+                                        if stage.pointing: Rectangle {
+                                            x: stage.hover-x * stage.cell;
+                                            y: stage.hover-y * stage.cell;
+                                            width: stage.cell;
+                                            height: stage.cell;
+                                            border-width: 1px;
+                                            border-color: root.studio_canvas_bg == 1 ? #00000066 : #FFFFFF77;
+                                        }
+
+                                        // The hotspot, drawn as a registration mark.
+                                        if stage.has-frame: Rectangle {
+                                            property <length> cx: (root.studio_hotspot_x + 0.5) * stage.cell;
+                                            property <length> cy: (root.studio_hotspot_y + 0.5) * stage.cell;
+                                            property <length> ring: max(18px, stage.cell + 10px);
+                                            Rectangle {
+                                                x: root.studio_hotspot_x * stage.cell;
+                                                y: root.studio_hotspot_y * stage.cell;
+                                                width: stage.cell;
+                                                height: stage.cell;
+                                                background: #C9845A88;
+                                            }
+                                            Rectangle {
+                                                x: parent.cx - parent.ring / 2;
+                                                y: parent.cy - parent.ring / 2;
+                                                width: parent.ring;
+                                                height: parent.ring;
+                                                border-radius: parent.ring / 2;
+                                                border-width: 1.5px;
+                                                border-color: Ink.click;
+                                            }
+                                            Rectangle {
+                                                x: parent.cx - parent.ring / 2 - 7px;
+                                                y: parent.cy - 0.5px;
+                                                width: parent.ring + 14px;
+                                                height: 1px;
+                                                background: Ink.click;
+                                            }
+                                            Rectangle {
+                                                x: parent.cx - 0.5px;
+                                                y: parent.cy - parent.ring / 2 - 7px;
+                                                width: 1px;
+                                                height: parent.ring + 14px;
+                                                background: Ink.click;
+                                            }
+                                        }
+
+                                        if !stage.has-frame: VerticalLayout {
+                                            padding: 20px;
+                                            alignment: center;
+                                            spacing: 10px;
+                                            Display {
+                                                text: studio_drop.has-drag ? "Drop to add frames" : "No art for " + root.studio_role_label + " yet";
+                                                font-size: 16px;
+                                                font-weight: 600;
+                                                color: root.studio_canvas_bg == 1 ? Ink.desk : Ink.ivory;
+                                                horizontal-alignment: center;
+                                                wrap: word-wrap;
+                                            }
+                                            Text {
+                                                text: "Drop PNG files here. Several files become an animation, in filename order.";
+                                                font-size: 12px;
+                                                color: root.studio_canvas_bg == 1 ? #4D5C46 : #B9CDB8;
+                                                horizontal-alignment: center;
+                                                wrap: word-wrap;
+                                            }
+                                            HorizontalLayout {
+                                                alignment: center;
+                                                FillBtn {
+                                                    label: "Choose images";
+                                                    clicked => { root.studio_pick_frames(false); }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        x: stage.board-x - 1px;
+                                        y: stage.board-y - 1px;
+                                        width: stage.side + 2px;
+                                        height: stage.side + 2px;
+                                        border-radius: 5px;
+                                        border-width: 1px;
+                                        border-color: keys.has-focus ? Ink.fog : (studio_drop.has-drag ? Ink.sage : #FFFFFF1F);
+                                    }
+
+                                    // Where the pointer is, then where the hotspot is, flagged on both rulers.
+                                    if stage.pointing: Rectangle {
+                                        x: stage.board-x + (stage.hover-x + 0.5) * stage.cell - self.width / 2;
+                                        y: stage.board-y - 25px;
+                                        width: hover-top.preferred-width + 10px;
+                                        height: 17px;
+                                        border-radius: 4px;
+                                        background: Ink.sage;
+                                        hover-top := Text {
+                                            text: stage.hover-x;
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            color: Ink.desk;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    if stage.pointing: Rectangle {
+                                        x: stage.board-x - self.width - 3px;
+                                        y: stage.board-y + (stage.hover-y + 0.5) * stage.cell - self.height / 2;
+                                        width: hover-left.preferred-width + 10px;
+                                        height: 17px;
+                                        border-radius: 4px;
+                                        background: Ink.sage;
+                                        hover-left := Text {
+                                            text: stage.hover-y;
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            color: Ink.desk;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    if stage.has-frame: Rectangle {
+                                        x: stage.board-x + (root.studio_hotspot_x + 0.5) * stage.cell - self.width / 2;
+                                        y: stage.board-y - 25px;
+                                        width: hot-top.preferred-width + 10px;
+                                        height: 17px;
+                                        border-radius: 4px;
+                                        background: Ink.click;
+                                        hot-top := Text {
+                                            text: root.studio_hotspot_x;
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            color: Ink.desk;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    if stage.has-frame: Rectangle {
+                                        x: stage.board-x - self.width - 3px;
+                                        y: stage.board-y + (root.studio_hotspot_y + 0.5) * stage.cell - self.height / 2;
+                                        width: hot-left.preferred-width + 10px;
+                                        height: 17px;
+                                        border-radius: 4px;
+                                        background: Ink.click;
+                                        hot-left := Text {
+                                            text: root.studio_hotspot_y;
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            color: Ink.desk;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    board-touch := TouchArea {
+                                        x: stage.board-x;
+                                        y: stage.board-y;
+                                        width: stage.side;
+                                        height: stage.side;
+                                        enabled: stage.has-frame;
+                                        mouse-cursor: stage.has-frame ? MouseCursor.crosshair : MouseCursor.default;
+                                        pointer-event(event) => {
+                                            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                                                keys.focus();
+                                                root.studio_set_hotspot(self.mouse-x / self.width, self.mouse-y / self.height);
+                                            }
+                                        }
+                                        moved => {
+                                            if self.pressed {
+                                                root.studio_set_hotspot(
+                                                    max(0, min(1, self.mouse-x / self.width)),
+                                                    max(0, min(1, self.mouse-y / self.height)));
+                                            }
+                                        }
+                                    }
+
+                                    keys := FocusScope {
+                                        width: 0px;
+                                        height: 0px;
+                                        key-pressed(event) => {
+                                            if event.text == Key.LeftArrow {
+                                                root.studio_nudge_hotspot(-1, 0);
+                                                return accept;
+                                            }
+                                            if event.text == Key.RightArrow {
+                                                root.studio_nudge_hotspot(1, 0);
+                                                return accept;
+                                            }
+                                            if event.text == Key.UpArrow {
+                                                root.studio_nudge_hotspot(0, -1);
+                                                return accept;
+                                            }
+                                            if event.text == Key.DownArrow {
+                                                root.studio_nudge_hotspot(0, 1);
+                                                return accept;
+                                            }
+                                            reject
+                                        }
+                                    }
+                                }
+
+                                // Frames, in the order they play.
+                                if root.studio_frames.length > 0: HorizontalLayout {
+                                    spacing: 10px;
+                                    height: 52px;
+
+                                    ScrollView {
+                                        horizontal-stretch: 1;
+                                        Rectangle {
+                                            x: 0;
+                                            y: 0;
+                                            width: root.studio_frames.length * 52px + 46px;
+                                            height: 46px;
+
+                                            for frame[index] in root.studio_frames: Rectangle {
+                                                x: index * 52px;
+                                                y: 0;
+                                                width: 46px;
+                                                height: 46px;
+                                                border-radius: 8px;
+                                                background: index == root.studio_frame_index ? #FFFFFF1F : (frame-touch.has-hover ? #FFFFFF12 : #00000033);
+                                                border-width: index == root.studio_frame_index ? 1px : 0px;
+                                                border-color: #FFFFFF55;
+                                                Image {
+                                                    x: 7px;
+                                                    y: 5px;
+                                                    width: 26px;
+                                                    height: 26px;
+                                                    source: frame;
+                                                    image-fit: contain;
+                                                }
+                                                Text {
+                                                    x: 0;
+                                                    y: 30px;
+                                                    width: parent.width - 6px;
+                                                    height: 14px;
+                                                    text: index + 1;
+                                                    font-size: 11px;
+                                                    color: index == root.studio_frame_index ? Ink.ivory : Ink.mist;
+                                                    horizontal-alignment: right;
+                                                }
+                                                frame-touch := TouchArea {
+                                                    mouse-cursor: pointer;
+                                                    clicked => { root.studio_select_frame(index); }
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                x: root.studio_frames.length * 52px;
+                                                y: 0;
+                                                width: 46px;
+                                                height: 46px;
+                                                border-radius: 8px;
+                                                border-width: 1px;
+                                                border-color: #FFFFFF2E;
+                                                background: add-touch.has-hover ? #FFFFFF12 : #00000000;
+                                                Text {
+                                                    width: 100%;
+                                                    height: 100%;
+                                                    text: "+";
+                                                    font-size: 18px;
+                                                    color: Ink.fog;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                                add-touch := TouchArea {
+                                                    mouse-cursor: pointer;
+                                                    clicked => { root.studio_pick_frames(false); }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if root.studio_frames.length > 1: VerticalLayout {
+                                        alignment: center;
+                                        GlyphBtn {
+                                            glyph: "◀";
+                                            enabled: root.studio_frame_index > 0;
+                                            clicked => { root.studio_move_frame(-1); }
+                                        }
+                                    }
+                                    if root.studio_frames.length > 1: VerticalLayout {
+                                        alignment: center;
+                                        GlyphBtn {
+                                            glyph: "▶";
+                                            enabled: root.studio_frame_index < root.studio_frames.length - 1;
+                                            clicked => { root.studio_move_frame(1); }
+                                        }
+                                    }
+                                    if root.studio_frames.length > 1: VerticalLayout {
+                                        alignment: center;
+                                        FillBtn {
+                                            height: 32px;
+                                            label: "Remove frame";
+                                            quiet: true;
+                                            clicked => { root.studio_remove_frame(); }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        FillBtn {
+                                            height: 32px;
+                                            label: "Replace";
+                                            quiet: true;
+                                            clicked => { root.studio_pick_frames(true); }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        FillBtn {
+                                            height: 32px;
+                                            label: "Clear";
+                                            quiet: true;
+                                            danger: true;
+                                            clicked => { root.studio_clear_role(); }
+                                        }
+                                    }
+                                }
+
+                                // A proof strip at true size, on light and on dark.
+                                Rectangle {
+                                    height: 62px;
+                                    border-radius: 10px;
+                                    clip: true;
+
+                                    property <int> tick: 0;
+                                    Timer {
+                                        interval: max(10, root.studio_delay) * 1ms;
+                                        running: root.page == 2 && root.studio_frames.length > 1;
+                                        triggered => {
+                                            parent.tick = Math.mod(parent.tick + 1, max(1, root.studio_frames.length));
+                                        }
+                                    }
+                                    property <image> live: root.studio_frames[Math.min(self.tick, root.studio_frames.length - 1)];
+
+                                    HorizontalLayout {
+                                        for shade in [Ink.parchment, #0B0F0A]: Rectangle {
+                                            horizontal-stretch: 1;
+                                            background: shade;
+                                            HorizontalLayout {
+                                                padding-left: 12px;
+                                                padding-right: 12px;
+                                                spacing: 12px;
+                                                Rectangle {
+                                                    horizontal-stretch: 1;
+                                                }
+                                                for px in [24, 32, 48]: VerticalLayout {
+                                                    alignment: center;
+                                                    Image {
+                                                        width: px * 1px;
+                                                        height: px * 1px;
+                                                        source: live;
+                                                        image-fit: contain;
+                                                    }
+                                                }
+                                                Rectangle {
+                                                    horizontal-stretch: 1;
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
 
+                    // Inspector.
                     Rectangle {
-                        width: 250px;
+                        width: 260px;
                         border-radius: 18px;
                         background: Ink.well;
                         border-width: 1px;
@@ -917,76 +1430,205 @@ export component MainWindow inherits Window {
                         VerticalLayout {
                             width: 100%;
                             height: 100%;
-                            padding: 16px;
-                            spacing: 12px;
 
-                            Display {
-                                text: "Theme";
-                                font-size: 11px;
-                                font-weight: 700;
-                                color: Ink.mist;
-                            }
+                            ScrollView {
+                                vertical-stretch: 1;
+                                VerticalLayout {
+                                    padding: 16px;
+                                    padding-right: 20px;
+                                    spacing: 10px;
 
-                            Field {
-                                placeholder: "Name";
-                                value <=> root.studio_name;
-                            }
+                                    Display {
+                                        text: "Hotspot";
+                                        font-size: 14px;
+                                        font-weight: 600;
+                                        color: Ink.ivory;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Display {
+                                            text: root.studio_frames.length > 0 ? root.studio_hotspot_x + ", " + root.studio_hotspot_y : "—";
+                                            font-size: 24px;
+                                            font-weight: 600;
+                                            color: root.studio_frames.length > 0 ? Ink.click : Ink.mist;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: root.studio_frames.length > 0 ? "px on a " + root.studio_edge + " px frame" : "Add art to place it";
+                                            font-size: 12px;
+                                            color: Ink.mist;
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 1;
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 4px;
+                                        GridLayout {
+                                            spacing: 4px;
+                                            Row {
+                                                Rectangle { width: 30px; height: 30px; }
+                                                GlyphBtn {
+                                                    width: 30px;
+                                                    height: 30px;
+                                                    glyph: "↑";
+                                                    enabled: root.studio_frames.length > 0;
+                                                    clicked => { root.studio_nudge_hotspot(0, -1); }
+                                                }
+                                            }
+                                            Row {
+                                                GlyphBtn {
+                                                    width: 30px;
+                                                    height: 30px;
+                                                    glyph: "←";
+                                                    enabled: root.studio_frames.length > 0;
+                                                    clicked => { root.studio_nudge_hotspot(-1, 0); }
+                                                }
+                                                GlyphBtn {
+                                                    width: 30px;
+                                                    height: 30px;
+                                                    glyph: "↓";
+                                                    enabled: root.studio_frames.length > 0;
+                                                    clicked => { root.studio_nudge_hotspot(0, 1); }
+                                                }
+                                                GlyphBtn {
+                                                    width: 30px;
+                                                    height: 30px;
+                                                    glyph: "→";
+                                                    enabled: root.studio_frames.length > 0;
+                                                    clicked => { root.studio_nudge_hotspot(1, 0); }
+                                                }
+                                            }
+                                        }
+                                        VerticalLayout {
+                                            alignment: end;
+                                            padding-left: 6px;
+                                            horizontal-stretch: 1;
+                                            FillBtn {
+                                                height: 30px;
+                                                label: "Auto-place";
+                                                quiet: true;
+                                                clicked => { root.studio_auto_hotspot(); }
+                                            }
+                                        }
+                                    }
 
-                            Field {
-                                placeholder: "Comment (optional)";
-                                value <=> root.studio_comment;
-                            }
+                                    Rectangle { height: 12px; }
 
-                            Display {
-                                text: "Nominal size";
-                                font-size: 11px;
-                                font-weight: 700;
-                                color: Ink.mist;
-                            }
+                                    Display {
+                                        text: "Animation";
+                                        font-size: 14px;
+                                        font-weight: 600;
+                                        color: Ink.ivory;
+                                    }
+                                    Text {
+                                        text: root.studio_frames.length > 1
+                                            ? root.studio_frames.length + " frames, " + root.studio_delay + " ms each"
+                                            : (root.studio_frames.length == 1 ? "One frame. Add more to animate this role." : "—");
+                                        font-size: 12px;
+                                        color: Ink.fog;
+                                        wrap: word-wrap;
+                                    }
+                                    if root.studio_frames.length > 1: Segments {
+                                        for delay in [50, 80, 120, 200]: SegmentBtn {
+                                            label: delay + " ms";
+                                            active: root.studio_delay == delay;
+                                            clicked => { root.studio_set_delay(delay); }
+                                        }
+                                    }
 
-                            HorizontalLayout {
-                                height: 36px;
-                                spacing: 6px;
-                                SizePill {
-                                    px: 24;
-                                    active: root.studio_size == 24;
-                                    clicked => { root.studio_size = 24; }
-                                }
+                                    Rectangle { height: 12px; }
 
-                                SizePill {
-                                    px: 32;
-                                    active: root.studio_size == 32;
-                                    clicked => { root.studio_size = 32; }
-                                }
+                                    Display {
+                                        text: "Theme";
+                                        font-size: 14px;
+                                        font-weight: 600;
+                                        color: Ink.ivory;
+                                    }
+                                    Field {
+                                        placeholder: "Theme name";
+                                        value <=> root.studio_name;
+                                        edited => { root.studio_meta_changed(); }
+                                    }
+                                    Field {
+                                        placeholder: "Description (optional)";
+                                        value <=> root.studio_comment;
+                                        edited => { root.studio_meta_changed(); }
+                                    }
+                                    Text {
+                                        text: "Sizes in the pack, in px";
+                                        font-size: 12px;
+                                        color: Ink.mist;
+                                    }
+                                    Segments {
+                                        for size in root.studio_sizes: SegmentBtn {
+                                            label: size.px;
+                                            active: size.on;
+                                            clicked => { root.studio_toggle_size(size.px); }
+                                        }
+                                    }
+                                    ToggleRow {
+                                        title: "Fill empty roles";
+                                        hint: "Roles without art use Default.";
+                                        checked <=> root.studio_fill_missing;
+                                        toggled => { root.studio_meta_changed(); }
+                                    }
 
-                                SizePill {
-                                    px: 48;
-                                    active: root.studio_size == 48;
-                                    clicked => { root.studio_size = 48; }
-                                }
+                                    Rectangle { height: 12px; }
 
-                                SizePill {
-                                    px: 64;
-                                    active: root.studio_size == 64;
-                                    clicked => { root.studio_size = 64; }
+                                    Display {
+                                        text: "Start from";
+                                        font-size: 14px;
+                                        font-weight: 600;
+                                        color: Ink.ivory;
+                                    }
+                                    MenuSelect {
+                                        choices: root.studio_theme_choices;
+                                        selected <=> root.studio_open_index;
+                                        enabled: root.studio_theme_choices.length > 0;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        FillBtn {
+                                            horizontal-stretch: 1;
+                                            label: "Open theme";
+                                            quiet: true;
+                                            clicked => { root.studio_open_theme(root.studio_open_index); }
+                                        }
+                                        FillBtn {
+                                            horizontal-stretch: 1;
+                                            label: "Start over";
+                                            quiet: true;
+                                            clicked => { root.studio_new_project(); }
+                                        }
+                                    }
+                                    Text {
+                                        text: "Both replace the draft in Studio. Installed themes are left as they are.";
+                                        font-size: 11px;
+                                        color: Ink.mist;
+                                        wrap: word-wrap;
+                                    }
                                 }
                             }
 
                             Rectangle {
-                                vertical-stretch: 1;
-                                background: transparent;
+                                height: 1px;
+                                background: Ink.stroke;
                             }
 
-                            Text {
-                                text: "Exports into ~/.local/share/icons as an XCursor pack, with aliases for GTK and X11.";
-                                font-size: 11px;
-                                color: Ink.mist;
-                                wrap: word-wrap;
-                            }
-
-                            FillBtn {
-                                label: "Export and install";
-                                clicked => { root.studio_export(); }
+                            VerticalLayout {
+                                padding: 16px;
+                                padding-top: 12px;
+                                spacing: 8px;
+                                FillBtn {
+                                    label: "Install theme";
+                                    clicked => { root.studio_export(); }
+                                }
+                                Text {
+                                    text: "~/.local/share/icons/" + root.studio_folder;
+                                    font-size: 11px;
+                                    color: Ink.mist;
+                                    overflow: elide;
+                                }
                             }
                         }
                     }
