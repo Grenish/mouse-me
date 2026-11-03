@@ -43,7 +43,6 @@ pub(super) fn install(window: &MainWindow, library_cache: &Arc<Mutex<Vec<CursorT
         save_timer: Timer::default(),
     }));
 
-    window.set_studio_mat_tile(mat_tile());
     paint_meta(window, &studio.borrow());
     paint(window, &studio.borrow());
 
@@ -307,6 +306,46 @@ pub(super) fn install(window: &MainWindow, library_cache: &Arc<Mutex<Vec<CursorT
 
     {
         let (wh, studio, cache) = (wh.clone(), studio.clone(), library_cache.clone());
+        window.on_open_in_studio(move |name| {
+            let Some(w) = wh.upgrade() else { return };
+            let source = {
+                let themes = cache.lock().unwrap_or_else(|e| e.into_inner());
+                themes
+                    .iter()
+                    .find(|theme| theme.name == name.as_str())
+                    .map(|theme| (theme.display_name.clone(), theme.path.clone()))
+            };
+            let Some((label, path)) = source else {
+                set_status(&w, true, format!("{name} is no longer installed."));
+                return;
+            };
+            if !confirm(
+                &w,
+                &studio,
+                "open",
+                &format!("Choose Open in Studio again to replace your Studio draft with {label}."),
+            ) {
+                return;
+            }
+            match load_theme_project(&path) {
+                Ok(project) => {
+                    let count = project.roles.len();
+                    replace_project(&w, &studio, project);
+                    w.set_page(1);
+                    w.invoke_page_changed(1);
+                    set_status(
+                        &w,
+                        false,
+                        format!("Opened {label} in Studio: {count} roles"),
+                    );
+                }
+                Err(error) => set_status(&w, true, error),
+            }
+        });
+    }
+
+    {
+        let (wh, studio, cache) = (wh.clone(), studio.clone(), library_cache.clone());
         window.on_studio_export(move || {
             let Some(w) = wh.upgrade() else { return };
             let result = {
@@ -319,7 +358,7 @@ pub(super) fn install(window: &MainWindow, library_cache: &Arc<Mutex<Vec<CursorT
                     set_status(&w, false, format!("Installed {folder}"));
                     let settings = read_settings(&w);
                     if settings.auto_apply_on_import {
-                        apply_theme_async(&w, folder, settings.preferred_size, Some(&cache));
+                        apply_theme_async(&w, folder, settings.preferred_size, &cache, true);
                     } else {
                         rescan_library(&w, &cache, None, false);
                     }
@@ -559,23 +598,4 @@ fn paint_hotspot(window: &MainWindow, st: &Studio) {
 
 fn role_label(id: &str) -> &'static str {
     role_def(id).map(|def| def.label).unwrap_or("this role")
-}
-
-/// One square of the cutting mat behind the canvas: a faint line along two
-/// edges, tiled across the whole stage.
-fn mat_tile() -> Image {
-    const EDGE: u32 = 24;
-    let mut rgba = Vec::with_capacity((EDGE * EDGE * 4) as usize);
-    for y in 0..EDGE {
-        for x in 0..EDGE {
-            let alpha = if x == 0 || y == 0 { 10 } else { 0 };
-            rgba.extend_from_slice(&[255, 255, 255, alpha]);
-        }
-    }
-    let image = CursorImage {
-        width: EDGE,
-        height: EDGE,
-        rgba,
-    };
-    to_slint_image(Some(&image)).0
 }

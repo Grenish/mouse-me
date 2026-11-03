@@ -23,8 +23,8 @@ mod studio_page;
 static CURSOR_ARCHIVE_EXTENSIONS: [&str; 6] = ["zip", "gz", "tgz", "xz", "bz2", "tar"];
 static ALL_FILE_EXTENSIONS: [&str; 1] = ["*"];
 static IMAGE_EXTENSIONS: [&str; 3] = ["png", "jpg", "jpeg"];
-const LIBRARY_CARD_HEIGHT: f32 = 92.0;
-const LIBRARY_CARD_GAP: f32 = 10.0;
+const LIBRARY_CARD_HEIGHT: f32 = 73.0;
+const LIBRARY_CARD_GAP: f32 = 0.0;
 
 const APP_ID: &str = "mouse-me";
 static APPLY_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -54,11 +54,12 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         let wh = window_handle.clone();
+        let library_cache = library_cache.clone();
         main_window.on_apply_theme(move |theme_name, size| {
             let name_str = theme_name.as_str().to_string();
             let size_u32 = size.clamp(1, 512) as u32;
             let Some(w) = wh.upgrade() else { return };
-            apply_theme_async(&w, name_str, size_u32, None);
+            apply_theme_async(&w, name_str, size_u32, &library_cache, false);
         });
     }
 
@@ -212,6 +213,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
 
     {
         let wh = window_handle.clone();
+        let library_cache = library_cache.clone();
         main_window.on_size_changed(move |new_size| {
             let Some(w) = wh.upgrade() else { return };
             let size = new_size.clamp(1, 512);
@@ -229,7 +231,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
             if settings.apply_size_immediately {
                 let active = w.get_active_theme_name().as_str().to_string();
                 if !active.is_empty() && active != "default" {
-                    apply_theme_async(&w, active, size as u32, None);
+                    apply_theme_async(&w, active, size as u32, &library_cache, false);
                 } else {
                     set_status(&w, false, format!("Size set to {}px", size));
                 }
@@ -256,11 +258,11 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         format!("Could not save page preference: {}", error),
                     );
                 }
-                if page == 3 {
+                if page == 2 {
                     refresh_device_info_state(&w);
-                }
-                if page == 4 && w.get_auth_signed_in() {
-                    refresh_profile(&w);
+                    if w.get_auth_signed_in() {
+                        refresh_profile(&w);
+                    }
                 }
             }
         });
@@ -730,7 +732,8 @@ fn apply_settings_to_window(window: &MainWindow, settings: &AppSettings) {
     window.set_inactive_timeout(settings.inactive_timeout);
     window.set_auto_update(settings.auto_update);
     window.set_auto_update_when(settings.auto_update_when_index());
-    window.set_page(settings.last_page.clamp(0, 5));
+    window.set_appearance(settings.appearance_index());
+    window.set_page(settings.last_page.clamp(0, 2));
     window.set_active_size(settings.preferred_size as i32);
 }
 
@@ -759,6 +762,7 @@ fn read_settings(window: &MainWindow) -> AppSettings {
         inactive_timeout: window.get_inactive_timeout(),
         auto_update: window.get_auto_update(),
         auto_update_when: AppSettings::auto_update_when_from_index(window.get_auto_update_when()),
+        appearance: AppSettings::appearance_from_index(window.get_appearance()),
     }
 }
 
@@ -795,7 +799,8 @@ fn handle_import(window: &MainWindow, path: &Path, library_cache: &Arc<Mutex<Vec
                                 &window,
                                 name,
                                 settings.preferred_size,
-                                Some(&library_cache),
+                                &library_cache,
+                                true,
                             );
                         } else {
                             rescan_library(&window, &library_cache, None, false);
@@ -811,7 +816,6 @@ fn handle_import(window: &MainWindow, path: &Path, library_cache: &Arc<Mutex<Vec
 }
 
 fn mark_theme_applied(window: &MainWindow, name: &str, size: u32, warnings: &[String]) {
-    window.set_active_theme_name(SharedString::from(name));
     if warnings.is_empty() {
         set_status(window, false, format!("Applied {} at {}px", name, size));
     } else {
@@ -826,7 +830,17 @@ fn mark_theme_applied(window: &MainWindow, name: &str, size: u32, warnings: &[St
             ),
         );
     }
-    window.set_active_size(size as i32);
+}
+
+/// Shows `name` as the pointer in use everywhere on screen: the rows, the
+/// "In use" block and the top bar.
+fn show_active(window: &MainWindow, cache: &Arc<Mutex<Vec<CursorTheme>>>, name: &str) {
+    window.set_active_theme_name(SharedString::from(name));
+    paint_active_pointer(
+        window,
+        &cache.lock().unwrap_or_else(|e| e.into_inner()),
+        name,
+    );
 
     let themes = window.get_themes();
     let Some(model) = themes.as_any().downcast_ref::<VecModel<ThemeItem>>() else {
@@ -875,15 +889,28 @@ fn reveal_library_item(window: &MainWindow, index: usize) {
     }
 }
 
+/// Applies a pack in the background. The screen switches to it at once and
+/// switches back if writing it fails, so Apply never looks like it did
+/// nothing. `rescan` reloads the library afterwards, for a pack that was just
+/// installed.
 fn apply_theme_async(
     window: &MainWindow,
     name: String,
     size: u32,
-    rescan: Option<&Arc<Mutex<Vec<CursorTheme>>>>,
+    cache: &Arc<Mutex<Vec<CursorTheme>>>,
+    rescan: bool,
 ) {
     let settings = read_settings(window);
+    let previous = (
+        window.get_active_theme_name().to_string(),
+        window.get_active_size(),
+    );
+    show_active(window, cache, &name);
+    window.set_active_size(size as i32);
+    set_status(window, false, format!("Applying {name}…"));
+
     let weak = window.as_weak();
-    let rescan = rescan.cloned();
+    let cache = cache.clone();
     let generation = APPLY_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
         let result = {
@@ -901,13 +928,15 @@ fn apply_theme_async(
             match result {
                 Ok(warnings) => {
                     mark_theme_applied(&window, &name, size, &warnings);
-                    if let Some(cache) = rescan {
+                    if rescan {
                         rescan_library(&window, &cache, Some(name), false);
                     }
                 }
                 Err(error) => {
-                    set_status(&window, true, error);
-                    if let Some(cache) = rescan {
+                    show_active(&window, &cache, &previous.0);
+                    window.set_active_size(previous.1);
+                    set_status(&window, true, format!("Could not apply {name}: {error}"));
+                    if rescan {
                         rescan_library(&window, &cache, None, false);
                     }
                 }
@@ -983,18 +1012,14 @@ fn paint_library(window: &MainWindow, all_themes: &[CursorTheme], applied_theme:
 
     let mut ui_items = Vec::new();
 
+    let (mut count_user, mut count_system) = (0, 0);
+
     for theme in all_themes {
         let is_user = theme.is_user;
         if is_user && !show_user {
             continue;
         }
         if !is_user && !show_system {
-            continue;
-        }
-        if filter == "user" && !is_user {
-            continue;
-        }
-        if filter == "system" && is_user {
             continue;
         }
 
@@ -1013,6 +1038,20 @@ fn paint_library(window: &MainWindow, all_themes: &[CursorTheme], applied_theme:
             if !match_name && !match_disp && !match_comment {
                 continue;
             }
+        }
+
+        // The tab counts follow the search and format, so each tab says
+        // how many rows it will show.
+        if is_user {
+            count_user += 1;
+        } else {
+            count_system += 1;
+        }
+        if filter == "user" && !is_user {
+            continue;
+        }
+        if filter == "system" && is_user {
+            continue;
         }
 
         let is_active = theme.name.eq_ignore_ascii_case(&active_name);
@@ -1045,10 +1084,44 @@ fn paint_library(window: &MainWindow, all_themes: &[CursorTheme], applied_theme:
             .position(|item| item.name.eq_ignore_ascii_case(name))
     });
     window.set_theme_count(ui_items.len() as i32);
+    window.set_count_user(count_user);
+    window.set_count_system(count_system);
+    window.set_count_all(count_user + count_system);
+    paint_active_pointer(window, all_themes, &active_name);
     window.set_themes(ModelRc::from(Rc::new(VecModel::from(ui_items))));
     if let Some(index) = applied_index {
         reveal_library_item(window, index);
     }
+}
+
+/// Fills the "In use" block and the top bar from the applied pack, whatever
+/// the library's filters are hiding.
+fn paint_active_pointer(window: &MainWindow, all_themes: &[CursorTheme], active_name: &str) {
+    let active = all_themes
+        .iter()
+        .find(|theme| !active_name.is_empty() && theme.name.eq_ignore_ascii_case(active_name));
+    let Some(theme) = active else {
+        window.set_active_display_name(SharedString::from(active_name));
+        window.set_active_meta(SharedString::from(""));
+        window.set_active_has_preview(false);
+        return;
+    };
+    let source = if theme.is_user {
+        "your pack"
+    } else {
+        "system pack"
+    };
+    window.set_active_display_name(SharedString::from(theme.display_name.as_str()));
+    window.set_active_meta(SharedString::from(format!(
+        "{}, {source}",
+        theme.cursor_type
+    )));
+    let (default, has_preview) = to_slint_image(theme.preview_default.as_ref());
+    window.set_active_preview_default(default);
+    window.set_active_preview_pointer(to_slint_image(theme.preview_pointer.as_ref()).0);
+    window.set_active_preview_text(to_slint_image(theme.preview_text.as_ref()).0);
+    window.set_active_preview_wait(to_slint_image(theme.preview_wait.as_ref()).0);
+    window.set_active_has_preview(has_preview);
 }
 
 fn to_slint_image(cursor_img: Option<&CursorImage>) -> (Image, bool) {

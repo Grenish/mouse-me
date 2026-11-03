@@ -31,6 +31,8 @@ pub struct AppSettings {
     pub inactive_timeout: i32,
     pub auto_update: bool,
     pub auto_update_when: String,
+    /// "system", "dark" or "light".
+    pub appearance: String,
 }
 
 impl Default for AppSettings {
@@ -59,6 +61,7 @@ impl Default for AppSettings {
             inactive_timeout: 0,
             auto_update: false,
             auto_update_when: "next-launch".into(),
+            appearance: "system".into(),
         }
     }
 }
@@ -69,6 +72,22 @@ impl AppSettings {
             "background" => 1,
             "instantly" => 2,
             _ => 0,
+        }
+    }
+
+    pub fn appearance_index(&self) -> i32 {
+        match self.appearance.as_str() {
+            "dark" => 1,
+            "light" => 2,
+            _ => 0,
+        }
+    }
+
+    pub fn appearance_from_index(index: i32) -> String {
+        match index {
+            1 => "dark".into(),
+            2 => "light".into(),
+            _ => "system".into(),
         }
     }
 

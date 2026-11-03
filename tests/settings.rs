@@ -99,3 +99,21 @@ fn missing_auto_update_fields_keep_other_settings() {
     assert!(!restored.apply_hyprland);
     assert!(restored.apply_gtk);
 }
+
+#[test]
+fn appearance_defaults_to_system_and_maps_to_indices() {
+    let settings = mouse_me::core::settings::AppSettings::default();
+    assert_eq!(settings.appearance, "system");
+    assert_eq!(settings.appearance_index(), 0);
+    for (index, name) in [(0, "system"), (1, "dark"), (2, "light")] {
+        assert_eq!(
+            mouse_me::core::settings::AppSettings::appearance_from_index(index),
+            name
+        );
+    }
+    let light = mouse_me::core::settings::AppSettings {
+        appearance: "light".into(),
+        ..Default::default()
+    };
+    assert_eq!(light.appearance_index(), 2);
+}

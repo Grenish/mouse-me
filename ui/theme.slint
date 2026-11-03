@@ -1,567 +1,190 @@
-import "../assets/fonts/DM_Sans/static/DMSans-Regular.ttf";
-import "../assets/fonts/DM_Sans/static/DMSans-Medium.ttf";
-import "../assets/fonts/DM_Sans/static/DMSans-SemiBold.ttf";
-import "../assets/fonts/DM_Sans/static/DMSans-Bold.ttf";
-import "../assets/fonts/Outfit/static/Outfit-Regular.ttf";
-import "../assets/fonts/Outfit/static/Outfit-Medium.ttf";
-import "../assets/fonts/Outfit/static/Outfit-SemiBold.ttf";
-import "../assets/fonts/Outfit/static/Outfit-Bold.ttf";
+import "../assets/fonts/Inter/Inter-Regular.ttf";
+import "../assets/fonts/Inter/Inter-Medium.ttf";
+import "../assets/fonts/Inter/Inter-SemiBold.ttf";
+
+import { Palette } from "std-widgets.slint";
+
+// True-black flat, with a light counterpart: one ground, elevation by
+// lightness alone, colour only on data. `mode` is 0 to follow the desktop,
+// 1 for dark, 2 for light.
+export global Ink {
+    in-out property <int> mode: 0;
+    out property <bool> dark: root.mode == 1 || (root.mode == 0 && Palette.color-scheme != ColorScheme.light);
+
+    out property <color> ground: root.dark ? #000000 : #ffffff;
+    out property <color> surface: root.dark ? #111111 : #f6f6f6;
+    out property <color> raised: root.dark ? #2a2a2a : #e6e6e6;
+    out property <color> hover: root.dark ? #191919 : #f0f0f0;
+    out property <color> rule: root.dark ? #1a1a1a : #e8e8e8;
+    out property <color> row-rule: root.dark ? #161616 : #f0f0f0;
+    out property <color> control: root.dark ? #444444 : #d1d5db;
+    out property <color> overlay-hover: root.dark ? #ffffff14 : #0000000d;
+    out property <color> shadow: root.dark ? #00000080 : #0000001f;
+
+    out property <color> text: root.dark ? #ffffff : #111111;
+    out property <color> nav: root.dark ? #bbbbbb : #555555;
+    out property <color> muted: root.dark ? #b4b4b4 : #5f6368;
+    out property <color> faint: root.dark ? #949494 : #6b6b6b;
+
+    // The primary action is the text colour turned into a fill.
+    out property <color> primary: root.text;
+    out property <color> primary-hover: root.dark ? #e6e6e6 : #333333;
+    out property <color> on-primary: root.ground;
+
+    // The mascot's mint: the one data hue, darkened on white to stay legible.
+    out property <color> accent: root.dark ? #8fd9a8 : #1f7a4a;
+    out property <color> accent-bg: root.dark ? #16261b : #e3f4e9;
+    out property <color> on-accent: root.dark ? #000000 : #ffffff;
+    // Marks drawn on the canvas board, whose background the user picks.
+    out property <color> mark: #8fd9a8;
+
+    out property <color> negative: root.dark ? #e5566f : #c4242a;
+    out property <color> negative-bg: root.dark ? #2c1a20 : #ffedea;
+    out property <color> negative-edge: root.dark ? #5a2a33 : #f3c4c0;
+    out property <color> warning: root.dark ? #e5a93b : #92400e;
+    out property <color> warning-bg: root.dark ? #2b2414 : #fffbeb;
+}
 
 export global Type {
-    out property <string> heading: "DM Sans";
-    out property <string> body: "Outfit";
+    out property <string> family: "Inter";
+    out property <length> title: 20px;
+    out property <length> section: 16px;
+    out property <length> figure: 24px;
+    out property <length> body: 14px;
+    out property <length> small: 12px;
 }
 
-export component Display inherits Text {
-    font-family: Type.heading;
-}
-
-export global Ink {
-    out property <color> desk: #10140F;
-    out property <color> panel: #171C16;
-    out property <color> sidebar: #1B221A;
-    out property <color> well: #12170F;
-    out property <color> stroke: #2C3529;
-    out property <color> stroke-strong: #3D4A38;
-    out property <color> parchment: #E6D5B8;
-    out property <color> ivory: #F3EBDD;
-    out property <color> sage: #6B9468;
-    out property <color> spruce: #1E4F34;
-    out property <color> click: #C9845A;
-    out property <color> fog: #B8C4B3;
-    out property <color> mist: #8A9686;
-    out property <color> danger: #B85C4A;
-    out property <color> ghost: #FFFFFF0D;
-    out property <color> ghost-hover: #FFFFFF14;
-}
-
-export component NavBtn inherits Rectangle {
-    in property <bool> active;
+export component NavItem inherits Rectangle {
     in property <string> label;
     in property <image> icon;
+    in property <bool> active;
+    in property <string> meta;
     callback clicked;
 
-    width: 64px;
-    height: 56px;
-    border-radius: 16px;
-    background: root.active ? #1E4F3455 : (touch.has-hover ? Ink.ghost-hover : #00000000);
+    height: 34px;
+    border-radius: 8px;
+    background: touch.has-hover && !root.active ? Ink.hover : transparent;
 
-    VerticalLayout {
-        width: 100%;
-        height: 100%;
-        alignment: center;
-        spacing: 5px;
-
-        HorizontalLayout {
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 10px;
+        VerticalLayout {
             alignment: center;
             Image {
+                width: 16px;
+                height: 16px;
                 source: root.icon;
-                width: 20px;
-                height: 20px;
-                image-fit: contain;
-                colorize: root.active ? Ink.parchment : (touch.has-hover ? Ink.ivory : Ink.fog);
+                colorize: root.active ? Ink.text : Ink.faint;
             }
         }
-
-        Display {
-            text: root.label;
-            font-size: 10px;
-            font-weight: root.active ? 700 : 500;
-            color: root.active ? Ink.parchment : Ink.mist;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-    }
-
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-export component UserNav inherits Rectangle {
-    in property <bool> active;
-    in property <bool> signed-in;
-    in property <bool> has-photo;
-    in property <string> label;
-    in property <image> icon;
-    in property <image> photo;
-    callback clicked;
-
-    width: 64px;
-    height: root.signed-in ? 64px : 56px;
-    border-radius: 16px;
-    background: root.active ? #1E4F3455 : (touch.has-hover ? Ink.ghost-hover : #00000000);
-
-    VerticalLayout {
-        width: 100%;
-        height: 100%;
-        alignment: center;
-        spacing: 5px;
-
-        HorizontalLayout {
-            alignment: center;
-            if root.signed-in && root.has-photo: Rectangle {
-                width: 32px;
-                height: 32px;
-                border-radius: 16px;
-                clip: true;
-                background: Ink.ghost;
-                Image {
-                    width: 100%;
-                    height: 100%;
-                    source: root.photo;
-                    image-fit: cover;
-                }
-            }
-            if !(root.signed-in && root.has-photo): Image {
-                source: root.icon;
-                width: 20px;
-                height: 20px;
-                image-fit: contain;
-                colorize: root.active ? Ink.parchment : (touch.has-hover ? Ink.ivory : Ink.fog);
-            }
-        }
-
-        Display {
-            width: 56px;
-            text: root.label;
-            font-size: 10px;
-            font-weight: root.active ? 700 : 500;
-            color: root.active ? Ink.parchment : Ink.mist;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-    }
-
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-export component Chip inherits Rectangle {
-    in property <string> label;
-    in property <bool> active;
-    callback clicked;
-
-    horizontal-stretch: 0;
-    height: 36px;
-    border-radius: 18px;
-    border-width: 1px;
-    border-color: root.active ? Ink.sage : Ink.stroke;
-    background: root.active ? #6B946833 : (touch.has-hover ? Ink.ghost : #00000000);
-
-    HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        alignment: center;
         Text {
             text: root.label;
-            font-size: 11px;
-            font-weight: root.active ? 700 : 500;
-            color: root.active ? Ink.parchment : Ink.fog;
+            font-size: Type.body;
+            font-weight: root.active ? 500 : 400;
+            color: root.active ? Ink.text : Ink.nav;
             vertical-alignment: center;
-            horizontal-alignment: center;
-        }
-    }
-
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-export component Tag inherits Rectangle {
-    in property <string> label;
-    in property <color> fill: Ink.ghost;
-    in property <color> ink: Ink.fog;
-
-    horizontal-stretch: 0;
-    vertical-stretch: 0;
-    height: 20px;
-    width: caption.preferred-width + 16px;
-    border-radius: 6px;
-    background: root.fill;
-
-    caption := Text {
-        x: 8px;
-        width: parent.width - 16px;
-        height: 100%;
-        text: root.label;
-        font-size: 10px;
-        font-weight: 700;
-        color: root.ink;
-        vertical-alignment: center;
-        horizontal-alignment: center;
-    }
-}
-
-export component SizePill inherits Rectangle {
-    in property <int> px;
-    in property <bool> active;
-    callback clicked;
-
-    width: 48px;
-    height: 36px;
-    border-radius: 10px;
-    background: root.active ? Ink.parchment : (touch.has-hover ? Ink.ghost-hover : Ink.ghost);
-
-    Text {
-        width: 100%;
-        height: 100%;
-        text: root.px + "px";
-        font-size: 11px;
-        font-weight: root.active ? 700 : 500;
-        color: root.active ? Ink.desk : Ink.fog;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-export component Toggle inherits Rectangle {
-    in-out property <bool> checked;
-    callback toggled;
-
-    width: 42px;
-    height: 24px;
-    border-radius: 12px;
-    background: root.checked ? Ink.sage : Ink.stroke;
-
-    animate background { duration: 140ms; }
-
-    Rectangle {
-        x: root.checked ? parent.width - self.width - 3px : 3px;
-        y: 3px;
-        width: 18px;
-        height: 18px;
-        border-radius: 9px;
-        background: root.checked ? Ink.parchment : Ink.fog;
-        animate x { duration: 140ms; easing: ease-out; }
-    }
-
-    TouchArea {
-        mouse-cursor: pointer;
-        clicked => {
-            root.checked = !root.checked;
-            root.toggled();
-        }
-    }
-}
-
-export component ToggleRow inherits Rectangle {
-    in property <string> title;
-    in property <string> hint;
-    in-out property <bool> checked;
-    callback toggled;
-
-    background: transparent;
-    min-height: 56px;
-
-    HorizontalLayout {
-        width: 100%;
-        height: 100%;
-        padding-top: 10px;
-        padding-bottom: 10px;
-        spacing: 16px;
-
-        VerticalLayout {
-            spacing: 3px;
-            alignment: center;
             horizontal-stretch: 1;
-            Display {
-                text: root.title;
-                font-size: 13px;
-                font-weight: 600;
-                color: Ink.ivory;
-                vertical-alignment: center;
-            }
-            Text {
-                text: root.hint;
-                font-size: 11px;
-                color: Ink.mist;
-                wrap: word-wrap;
-                vertical-alignment: center;
-            }
         }
+        Text {
+            text: root.meta;
+            font-size: Type.small;
+            color: Ink.faint;
+            vertical-alignment: center;
+        }
+    }
 
-        VerticalLayout {
-            alignment: center;
-            vertical-stretch: 1;
-            Toggle {
-                checked <=> root.checked;
-                toggled => { root.toggled(); }
-            }
-        }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
     }
 }
 
-export component MenuSelect inherits Rectangle {
-    in-out property <int> selected: 0;
-    in property <[string]> choices: [];
-    in property <bool> enabled: true;
-    in-out property <bool> open: false;
-    callback changed;
-
-    vertical-stretch: 0;
-    border-radius: 10px;
-    border-width: 1px;
-    border-color: root.open && root.enabled ? Ink.sage : Ink.stroke;
-    background: Ink.well;
-    opacity: root.enabled ? 1 : 0.55;
-    clip: true;
-
-    VerticalLayout {
-        spacing: 0px;
-
-        Rectangle {
-            height: 36px;
-            HorizontalLayout {
-                width: 100%;
-                height: 100%;
-                padding-left: 12px;
-                padding-right: 12px;
-                spacing: 8px;
-                Text {
-                    text: root.choices.length > 0 && root.selected >= 0 && root.selected < root.choices.length ? root.choices[root.selected] : "";
-                    font-size: 13px;
-                    color: Ink.ivory;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                    overflow: elide;
-                }
-                Text {
-                    text: root.open && root.enabled ? "▴" : "▾";
-                    font-size: 11px;
-                    color: Ink.mist;
-                    vertical-alignment: center;
-                }
-            }
-            TouchArea {
-                mouse-cursor: pointer;
-                clicked => {
-                    if root.enabled {
-                        root.open = !root.open;
-                    }
-                }
-            }
-        }
-
-        if root.open && root.enabled: VerticalLayout {
-            padding: 4px;
-            spacing: 2px;
-            for choice[index] in root.choices: Rectangle {
-                height: 32px;
-                border-radius: 8px;
-                background: index == root.selected ? Ink.ghost : (row.has-hover ? Ink.ghost-hover : #00000000);
-                HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 8px;
-                    Text {
-                        text: choice;
-                        font-size: 12px;
-                        font-weight: index == root.selected ? 700 : 500;
-                        color: index == root.selected ? Ink.parchment : Ink.fog;
-                        vertical-alignment: center;
-                    }
-                }
-                row := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        root.selected = index;
-                        root.open = false;
-                        root.changed();
-                    }
-                }
-            }
-        }
-    }
-}
-
+// Buttons are pills. Primary is white with black text; secondary is outlined;
+// danger is outlined with the negative ink. Only one primary per screen.
 export component FillBtn inherits Rectangle {
     in property <string> label;
     in property <bool> quiet: false;
     in property <bool> danger: false;
     in property <bool> with-icon: false;
     in property <bool> busy: false;
+    in property <bool> enabled: true;
     in property <image> icon;
     callback clicked;
 
     height: 36px;
-    border-radius: 10px;
-    background: root.danger ? (touch.has-hover ? #B85C4Acc : #B85C4A33)
-        : root.quiet ? (touch.has-hover ? Ink.ghost-hover : Ink.ghost)
-        : (touch.has-hover ? #7AA676 : Ink.sage);
-    opacity: root.busy ? 0.85 : 1;
+    min-width: caption.preferred-width + 32px;
+    border-radius: self.height / 2;
+    property <bool> primary: !root.quiet && !root.danger;
+    background: root.primary ? (touch.has-hover ? Ink.primary-hover : Ink.primary)
+        : (touch.has-hover ? Ink.hover : transparent);
+    border-width: root.primary ? 0px : 1px;
+    border-color: root.danger ? Ink.negative-edge : Ink.control;
+    opacity: root.enabled ? (root.busy ? 0.7 : 1) : 0.4;
 
-    property <color> ink: root.danger ? Ink.parchment : root.quiet ? Ink.fog : Ink.desk;
+    property <color> ink: root.primary ? Ink.on-primary : (root.danger ? Ink.negative : Ink.text);
     property <angle> turn: 0deg;
 
-    spin := Timer {
+    Timer {
         interval: 16ms;
         running: root.busy;
-        triggered => {
-            root.turn += 14deg;
-        }
+        triggered => { root.turn += 14deg; }
     }
 
     HorizontalLayout {
-        width: 100%;
-        height: 100%;
-        padding-left: 14px;
-        padding-right: 14px;
+        padding-left: 16px;
+        padding-right: 16px;
         spacing: 8px;
         alignment: center;
 
         if root.with-icon || root.busy: VerticalLayout {
             alignment: center;
             Image {
-                width: 16px;
-                height: 16px;
+                width: 14px;
+                height: 14px;
                 source: root.busy ? @image-url("../assets/icons/spinner.svg") : root.icon;
-                image-fit: contain;
                 colorize: root.ink;
                 transform-rotation: root.busy ? root.turn : 0deg;
             }
         }
 
-        Text {
+        caption := Text {
             text: root.label;
-            font-size: 12px;
-            font-weight: 700;
+            font-size: 13px;
+            font-weight: 500;
             color: root.ink;
             vertical-alignment: center;
-            horizontal-alignment: center;
-            height: 100%;
         }
     }
 
     touch := TouchArea {
-        mouse-cursor: pointer;
+        mouse-cursor: root.enabled ? pointer : default;
         clicked => {
-            if !root.busy {
+            if root.enabled && !root.busy {
                 root.clicked();
             }
         }
     }
 }
 
-export component PreviewSlot inherits Rectangle {
-    in property <image> frame;
-    width: 32px;
-    height: 32px;
-    background: transparent;
-
-    Image {
-        width: 100%;
-        height: 100%;
-        source: root.frame;
-        image-fit: contain;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        image-rendering: smooth;
-    }
-}
-
-export component Field inherits Rectangle {
-    in property <string> placeholder;
-    in property <bool> secret: false;
-    in-out property <string> value;
-    in-out property <bool> revealed: false;
-    callback edited(string);
-    callback accepted;
-
-    height: 36px;
-    border-radius: 10px;
-    border-width: 1px;
-    border-color: input.has-focus ? Ink.sage : Ink.stroke;
-    background: Ink.well;
-
-    input := TextInput {
-        x: 12px;
-        y: 0;
-        width: root.secret ? parent.width - 68px : parent.width - 24px;
-        height: 100%;
-        text <=> root.value;
-        color: Ink.ivory;
-        font-size: 13px;
-        font-family: Type.body;
-        single-line: true;
-        input-type: (root.secret && !root.revealed) ? InputType.password : InputType.text;
-        vertical-alignment: center;
-        horizontal-alignment: left;
-        edited => { root.edited(self.text); }
-        accepted => { root.accepted(); }
-    }
-
-    if input.text == "": Text {
-        x: 12px;
-        y: 0;
-        width: root.secret ? parent.width - 68px : parent.width - 24px;
-        height: 100%;
-        text: root.placeholder;
-        color: Ink.mist;
-        font-size: 13px;
-        vertical-alignment: center;
-        horizontal-alignment: left;
-    }
-
-    if root.secret: reveal := TouchArea {
-        x: parent.width - 52px;
-        y: 0;
-        width: 44px;
-        height: 100%;
-        mouse-cursor: pointer;
-        clicked => { root.revealed = !root.revealed; }
-        Text {
-            width: 100%;
-            height: 100%;
-            text: root.revealed ? "Hide" : "Show";
-            font-size: 11px;
-            font-weight: 600;
-            color: reveal.has-hover ? Ink.ivory : Ink.mist;
-            vertical-alignment: center;
-            horizontal-alignment: center;
-        }
-    }
-}
-
-export component DebugRow inherits Rectangle {
+// A text-only action, for links that sit inside a sentence or a row.
+export component TextBtn inherits Rectangle {
     in property <string> label;
-    in property <string> value;
+    in property <bool> danger: false;
+    callback clicked;
 
-    min-height: 28px;
-    background: transparent;
-
-    HorizontalLayout {
-        spacing: 12px;
-        padding-top: 6px;
-        padding-bottom: 6px;
-
-        Display {
-            width: 72px;
-            text: root.label;
-            font-size: 11px;
-            font-weight: 600;
-            color: Ink.mist;
-            vertical-alignment: top;
-        }
-
-        Text {
-            text: root.value != "" ? root.value : "—";
-            font-size: 13px;
-            font-weight: 500;
-            color: Ink.ivory;
-            wrap: word-wrap;
-            horizontal-stretch: 1;
-            vertical-alignment: top;
-        }
+    height: 28px;
+    width: caption.preferred-width;
+    caption := Text {
+        text: root.label;
+        font-size: 13px;
+        font-weight: 500;
+        color: root.danger ? Ink.negative : (touch.has-hover ? Ink.text : Ink.muted);
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
     }
 }
 
@@ -572,17 +195,18 @@ export component GlyphBtn inherits Rectangle {
 
     width: 32px;
     height: 32px;
-    border-radius: 9px;
-    background: !root.enabled ? Ink.ghost : (touch.has-hover ? Ink.ghost-hover : Ink.ghost);
-    opacity: root.enabled ? 1 : 0.4;
+    border-radius: self.height / 2;
+    border-width: 1px;
+    border-color: Ink.control;
+    background: touch.has-hover && root.enabled ? Ink.hover : transparent;
+    opacity: root.enabled ? 1 : 0.35;
 
     Text {
         width: 100%;
         height: 100%;
         text: root.glyph;
         font-size: 13px;
-        font-weight: 700;
-        color: Ink.fog;
+        color: Ink.text;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -597,11 +221,18 @@ export component GlyphBtn inherits Rectangle {
     }
 }
 
-export component SectionLabel inherits Text {
-    font-family: Type.heading;
-    font-size: 11px;
-    font-weight: 700;
-    color: Ink.mist;
+// Segmented choice: the chosen segment is one lightness step up.
+export component Segments inherits Rectangle {
+    border-radius: self.height / 2;
+    background: Ink.ground;
+    border-width: 1px;
+    border-color: Ink.raised;
+    height: 34px;
+    HorizontalLayout {
+        padding: 2px;
+        spacing: 2px;
+        @children
+    }
 }
 
 export component SegmentBtn inherits Rectangle {
@@ -609,19 +240,18 @@ export component SegmentBtn inherits Rectangle {
     in property <bool> active;
     callback clicked;
 
-    height: 28px;
-    min-width: caption.preferred-width + 20px;
+    min-width: caption.preferred-width + 22px;
     horizontal-stretch: 1;
-    border-radius: 7px;
-    background: root.active ? #FFFFFF1F : (touch.has-hover ? Ink.ghost : #00000000);
+    border-radius: self.height / 2;
+    background: root.active ? Ink.raised : (touch.has-hover ? Ink.hover : transparent);
 
     caption := Text {
         width: 100%;
         height: 100%;
         text: root.label;
-        font-size: 12px;
-        font-weight: root.active ? 600 : 500;
-        color: root.active ? Ink.ivory : (touch.has-hover ? Ink.fog : Ink.mist);
+        font-size: 13px;
+        font-weight: root.active ? 500 : 400;
+        color: root.active ? Ink.text : Ink.muted;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -632,12 +262,378 @@ export component SegmentBtn inherits Rectangle {
     }
 }
 
-export component Segments inherits Rectangle {
+export component Tab inherits Rectangle {
+    in property <string> label;
+    in property <int> count: -1;
+    in property <bool> active;
+    callback clicked;
+
+    height: 40px;
+    width: row.preferred-width;
+
+    row := HorizontalLayout {
+        spacing: 6px;
+        Text {
+            text: root.label;
+            font-size: Type.body;
+            font-weight: root.active ? 500 : 400;
+            color: root.active ? Ink.text : (touch.has-hover ? Ink.muted : Ink.faint);
+            vertical-alignment: center;
+        }
+        if root.count >= 0: Text {
+            text: root.count;
+            font-size: Type.small;
+            color: Ink.faint;
+            vertical-alignment: center;
+        }
+    }
+
+    Rectangle {
+        y: parent.height - 2px;
+        height: 2px;
+        background: root.active ? Ink.text : transparent;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component Switch inherits Rectangle {
+    in-out property <bool> checked;
+    callback toggled;
+
+    width: 32px;
+    height: 18px;
     border-radius: 9px;
-    background: #00000038;
+    background: root.checked ? Ink.text : Ink.control;
+
+    Rectangle {
+        x: root.checked ? parent.width - self.width - 2px : 2px;
+        y: 2px;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: root.checked ? Ink.ground : Ink.ground;
+        animate x { duration: 120ms; easing: ease-out; }
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+}
+
+// A switch row inside a settings panel: title and description on the left.
+export component ToggleRow inherits Rectangle {
+    in property <string> title;
+    in property <string> hint;
+    in-out property <bool> checked;
+    callback toggled;
+
+    min-height: 56px;
     HorizontalLayout {
-        padding: 2px;
-        spacing: 2px;
-        @children
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 16px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 2px;
+            alignment: center;
+            Text {
+                text: root.title;
+                font-size: Type.body;
+                font-weight: 500;
+                color: Ink.text;
+                wrap: word-wrap;
+            }
+            if root.hint != "": Text {
+                text: root.hint;
+                font-size: 13px;
+                color: Ink.muted;
+                wrap: word-wrap;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Switch {
+                checked <=> root.checked;
+                toggled => { root.toggled(); }
+            }
+        }
+    }
+}
+
+export component Field inherits Rectangle {
+    in property <string> placeholder;
+    in property <bool> secret: false;
+    in-out property <string> value;
+    in-out property <bool> revealed: false;
+    callback edited(string);
+    callback accepted;
+
+    height: 36px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: input.has-focus ? Ink.faint : Ink.raised;
+    background: Ink.ground;
+
+    input := TextInput {
+        x: 12px;
+        width: root.secret ? parent.width - 68px : parent.width - 24px;
+        height: 100%;
+        text <=> root.value;
+        color: Ink.text;
+        font-size: Type.body;
+        single-line: true;
+        input-type: (root.secret && !root.revealed) ? InputType.password : InputType.text;
+        vertical-alignment: center;
+        selection-background-color: Ink.raised;
+        edited => { root.edited(self.text); }
+        accepted => { root.accepted(); }
+    }
+
+    if input.text == "": Text {
+        x: 12px;
+        width: parent.width - 24px;
+        height: 100%;
+        text: root.placeholder;
+        color: Ink.faint;
+        font-size: Type.body;
+        vertical-alignment: center;
+    }
+
+    if root.secret: reveal := TouchArea {
+        x: parent.width - 56px;
+        width: 48px;
+        height: 100%;
+        mouse-cursor: pointer;
+        Text {
+            width: 100%;
+            height: 100%;
+            text: root.revealed ? "Hide" : "Show";
+            font-size: Type.small;
+            color: reveal.has-hover ? Ink.text : Ink.faint;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        clicked => { root.revealed = !root.revealed; }
+    }
+}
+
+export component MenuSelect inherits Rectangle {
+    in-out property <int> selected: 0;
+    in property <[string]> choices: [];
+    in property <bool> enabled: true;
+    callback changed;
+
+    height: 36px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: Ink.raised;
+    background: touch.has-hover && root.enabled ? Ink.hover : Ink.ground;
+    opacity: root.enabled ? 1 : 0.5;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 8px;
+        Text {
+            text: root.choices.length > 0 && root.selected >= 0 && root.selected < root.choices.length ? root.choices[root.selected] : "—";
+            font-size: Type.body;
+            color: Ink.text;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        Text {
+            text: "⌄";
+            font-size: 13px;
+            color: Ink.faint;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            if root.enabled && root.choices.length > 0 {
+                menu.show();
+            }
+        }
+    }
+
+    menu := PopupWindow {
+        x: 0;
+        y: root.height + 4px;
+        width: root.width;
+        Rectangle {
+            background: Ink.dark ? Ink.raised : Ink.ground;
+            border-radius: 10px;
+            border-width: Ink.dark ? 0px : 1px;
+            border-color: Ink.rule;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: Ink.shadow;
+            VerticalLayout {
+                padding: 4px;
+                for choice[index] in root.choices: Rectangle {
+                    height: 32px;
+                    border-radius: 7px;
+                    background: option.has-hover ? Ink.overlay-hover : transparent;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        Text {
+                            text: choice;
+                            font-size: 13px;
+                            color: index == root.selected ? Ink.text : Ink.muted;
+                            font-weight: index == root.selected ? 500 : 400;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                    option := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.selected = index;
+                            root.changed();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Status pill: a dark tint with the ink of the same hue, beside a value only.
+export component Pill inherits Rectangle {
+    in property <string> label;
+    in property <color> fill: Ink.raised;
+    in property <color> ink: Ink.text;
+
+    height: 22px;
+    width: caption.preferred-width + 16px;
+    border-radius: 11px;
+    background: root.fill;
+    caption := Text {
+        x: 8px;
+        height: 100%;
+        text: root.label;
+        font-size: Type.small;
+        font-weight: 500;
+        color: root.ink;
+        vertical-alignment: center;
+    }
+}
+
+export component DebugRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+
+    min-height: 32px;
+    HorizontalLayout {
+        spacing: 12px;
+        Text {
+            width: 88px;
+            text: root.label;
+            font-size: 13px;
+            color: Ink.faint;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.value != "" ? root.value : "—";
+            font-size: 13px;
+            color: root.value != "" ? Ink.text : Ink.faint;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            wrap: word-wrap;
+        }
+    }
+}
+
+// One settings section: a label column beside its panel.
+export component SettingsSection inherits HorizontalLayout {
+    in property <string> title;
+    in property <string> summary;
+    in property <length> label-width: 248px;
+
+    spacing: 32px;
+    VerticalLayout {
+        width: root.label-width;
+        alignment: start;
+        spacing: 4px;
+        padding-top: 14px;
+        Text {
+            text: root.title;
+            font-size: Type.section;
+            font-weight: 500;
+            color: Ink.text;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.summary;
+            font-size: 13px;
+            color: Ink.muted;
+            wrap: word-wrap;
+        }
+    }
+    Rectangle {
+        horizontal-stretch: 1;
+        border-radius: 16px;
+        background: Ink.surface;
+        VerticalLayout {
+            padding-left: 18px;
+            padding-right: 18px;
+            padding-top: 6px;
+            padding-bottom: 6px;
+            @children
+        }
+    }
+}
+
+export component RowRule inherits Rectangle {
+    height: 1px;
+    background: Ink.rule;
+}
+
+// A pill that toggles on its own; on shows a tick, so a set of them reads
+// as a multiple choice rather than a single selection.
+export component CheckChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> checked;
+    callback clicked;
+
+    height: 30px;
+    min-width: row.preferred-width + 20px;
+    horizontal-stretch: 1;
+    border-radius: self.height / 2;
+    border-width: 1px;
+    border-color: root.checked ? Ink.faint : Ink.raised;
+    background: root.checked ? Ink.raised : (touch.has-hover ? Ink.hover : transparent);
+
+    row := HorizontalLayout {
+        alignment: center;
+        spacing: 4px;
+        if root.checked: Text {
+            text: "✓";
+            font-size: 11px;
+            color: Ink.text;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.label;
+            font-size: 13px;
+            color: root.checked ? Ink.text : Ink.muted;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
     }
 }
