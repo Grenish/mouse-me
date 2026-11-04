@@ -99,6 +99,15 @@ pub fn parse_xcursor_file(path: &Path, target_size: u32) -> Option<CursorImage> 
     })
 }
 
+/// One image chunk inside an XCursor file.
+#[derive(Debug, Clone)]
+pub struct XcursorFrame {
+    pub image: CursorImage,
+    pub xhot: u32,
+    pub yhot: u32,
+    pub delay_ms: u32,
+}
+
 /// Writes a single-frame XCursor file (Xcur) with a BGRA premultiplied payload.
 pub fn write_xcursor_file(
     path: &Path,
@@ -107,60 +116,147 @@ pub fn write_xcursor_file(
     yhot: u32,
     delay_ms: u32,
 ) -> Result<(), String> {
-    if image.width == 0 || image.height == 0 {
-        return Err("Cursor image is empty".into());
+    let frame = XcursorFrame {
+        image: image.clone(),
+        xhot,
+        yhot,
+        delay_ms,
+    };
+    write_xcursor_frames(path, std::slice::from_ref(&frame))
+}
+
+/// Writes every frame as its own chunk. The nominal size of a chunk is its
+/// larger edge, so frames of several sizes form a multi-size cursor and
+/// consecutive frames of one size form an animation.
+pub fn write_xcursor_frames(path: &Path, frames: &[XcursorFrame]) -> Result<(), String> {
+    if frames.is_empty() {
+        return Err("Cursor has no frames".into());
     }
-    if image.rgba.len() != (image.width as usize) * (image.height as usize) * 4 {
-        return Err("Cursor image pixel buffer does not match dimensions".into());
+    for frame in frames {
+        let image = &frame.image;
+        if image.width == 0 || image.height == 0 {
+            return Err("Cursor image is empty".into());
+        }
+        if image.rgba.len() != (image.width as usize) * (image.height as usize) * 4 {
+            return Err("Cursor image pixel buffer does not match dimensions".into());
+        }
     }
 
-    let xhot = xhot.min(image.width.saturating_sub(1));
-    let yhot = yhot.min(image.height.saturating_sub(1));
-    let nominal = image.width.max(image.height);
-
+    let ntoc = frames.len() as u32;
     let mut buf = Vec::new();
     write_u32(&mut buf, XCURSOR_MAGIC);
     write_u32(&mut buf, 16); // header bytes
     write_u32(&mut buf, 0x0001_0000); // version 1.0
-    write_u32(&mut buf, 1); // ntoc
+    write_u32(&mut buf, ntoc);
 
-    let chunk_pos = 16 + 12;
-    write_u32(&mut buf, XCURSOR_IMAGE_TYPE);
-    write_u32(&mut buf, nominal);
-    write_u32(&mut buf, chunk_pos);
+    let mut position = 16 + 12 * ntoc;
+    for frame in frames {
+        let nominal = frame.image.width.max(frame.image.height);
+        write_u32(&mut buf, XCURSOR_IMAGE_TYPE);
+        write_u32(&mut buf, nominal);
+        write_u32(&mut buf, position);
+        position += 36 + frame.image.width * frame.image.height * 4;
+    }
 
-    write_u32(&mut buf, 36); // chunk header size
-    write_u32(&mut buf, XCURSOR_IMAGE_TYPE);
-    write_u32(&mut buf, nominal);
-    write_u32(&mut buf, 1); // chunk version
-    write_u32(&mut buf, image.width);
-    write_u32(&mut buf, image.height);
-    write_u32(&mut buf, xhot);
-    write_u32(&mut buf, yhot);
-    write_u32(&mut buf, delay_ms.max(1));
+    for frame in frames {
+        let image = &frame.image;
+        let nominal = image.width.max(image.height);
+        write_u32(&mut buf, 36); // chunk header size
+        write_u32(&mut buf, XCURSOR_IMAGE_TYPE);
+        write_u32(&mut buf, nominal);
+        write_u32(&mut buf, 1); // chunk version
+        write_u32(&mut buf, image.width);
+        write_u32(&mut buf, image.height);
+        write_u32(&mut buf, frame.xhot.min(image.width - 1));
+        write_u32(&mut buf, frame.yhot.min(image.height - 1));
+        write_u32(&mut buf, frame.delay_ms.max(1));
 
-    let pixel_count = (image.width * image.height) as usize;
-    for i in 0..pixel_count {
-        let src = i * 4;
-        let r = image.rgba[src] as u16;
-        let g = image.rgba[src + 1] as u16;
-        let b = image.rgba[src + 2] as u16;
-        let a = image.rgba[src + 3] as u16;
-        let (pr, pg, pb) = if a == 0 {
-            (0, 0, 0)
-        } else {
-            ((r * a) / 255, (g * a) / 255, (b * a) / 255)
-        };
-        buf.push(pb as u8);
-        buf.push(pg as u8);
-        buf.push(pr as u8);
-        buf.push(a as u8);
+        for pixel in image.rgba.as_chunks::<4>().0 {
+            let a = pixel[3] as u16;
+            let premultiply = |channel: u8| ((channel as u16 * a) / 255) as u8;
+            buf.push(premultiply(pixel[2]));
+            buf.push(premultiply(pixel[1]));
+            buf.push(premultiply(pixel[0]));
+            buf.push(a as u8);
+        }
     }
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::write(path, buf).map_err(|e| format!("Failed to write {}: {}", path.display(), e))
+}
+
+/// Reads every frame of the nominal size closest to `target_size`, in file
+/// order, so animated cursors come back with all their frames.
+pub fn parse_xcursor_frames(path: &Path, target_size: u32) -> Option<Vec<XcursorFrame>> {
+    let mut file = File::open(path).ok()?;
+    let mut header = [0u8; 16];
+    file.read_exact(&mut header).ok()?;
+    if read_u32(&header, 0)? != XCURSOR_MAGIC {
+        return None;
+    }
+    let header_len = read_u32(&header, 4)?;
+    let ntoc = read_u32(&header, 12)? as usize;
+    if ntoc == 0 || ntoc > 1000 {
+        return None;
+    }
+    file.seek(SeekFrom::Start(header_len as u64)).ok()?;
+
+    let mut chunks = Vec::new();
+    for _ in 0..ntoc {
+        let mut toc = [0u8; 12];
+        file.read_exact(&mut toc).ok()?;
+        if read_u32(&toc, 0)? == XCURSOR_IMAGE_TYPE {
+            chunks.push((read_u32(&toc, 4)?, read_u32(&toc, 8)?));
+        }
+    }
+    let best = chunks
+        .iter()
+        .map(|(size, _)| *size)
+        .min_by_key(|size| (*size as i64 - target_size as i64).abs())?;
+
+    let mut frames = Vec::new();
+    for (size, position) in chunks {
+        if size != best || frames.len() >= 256 {
+            continue;
+        }
+        file.seek(SeekFrom::Start(position as u64)).ok()?;
+        let mut chunk = [0u8; 36];
+        file.read_exact(&mut chunk).ok()?;
+        let width = read_u32(&chunk, 16)?;
+        let height = read_u32(&chunk, 20)?;
+        if width == 0 || height == 0 || width > 512 || height > 512 {
+            return None;
+        }
+        let mut pixels = vec![0u8; (width * height * 4) as usize];
+        file.read_exact(&mut pixels).ok()?;
+        frames.push(XcursorFrame {
+            image: CursorImage {
+                width,
+                height,
+                rgba: unpremultiply_bgra(&pixels),
+            },
+            xhot: read_u32(&chunk, 24)?.min(width - 1),
+            yhot: read_u32(&chunk, 28)?.min(height - 1),
+            delay_ms: read_u32(&chunk, 32)?,
+        });
+    }
+    (!frames.is_empty()).then_some(frames)
+}
+
+fn unpremultiply_bgra(pixels: &[u8]) -> Vec<u8> {
+    let mut rgba = Vec::with_capacity(pixels.len());
+    for pixel in pixels.as_chunks::<4>().0 {
+        let a = pixel[3];
+        if a == 0 {
+            rgba.extend_from_slice(&[0, 0, 0, 0]);
+            continue;
+        }
+        let restore = |channel: u8| ((channel as u32 * 255) / a as u32).min(255) as u8;
+        rgba.extend_from_slice(&[restore(pixel[2]), restore(pixel[1]), restore(pixel[0]), a]);
+    }
+    rgba
 }
 
 fn write_u32(buf: &mut Vec<u8>, value: u32) {

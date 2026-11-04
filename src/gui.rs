@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::rc::Rc;
@@ -15,11 +13,12 @@ use mouse_me::core::device_info::{collect_device_info, copy_to_clipboard};
 use mouse_me::core::importer::{import_cursor_pack, is_safe_theme_name};
 use mouse_me::core::scanner::{get_active_cursor, scan_cursor_themes};
 use mouse_me::core::settings::AppSettings;
-use mouse_me::core::studio::{export_theme, load_png_as_cursor, STUDIO_ROLES};
 use mouse_me::core::types::{CursorImage, CursorTheme};
 use mouse_me::core::updater::{self, Release};
 
 slint::include_modules!();
+
+mod studio_page;
 
 static CURSOR_ARCHIVE_EXTENSIONS: [&str; 6] = ["zip", "gz", "tgz", "xz", "bz2", "tar"];
 static ALL_FILE_EXTENSIONS: [&str; 1] = ["*"];
@@ -42,16 +41,13 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
 
     let main_window = MainWindow::new()?;
     let window_handle = main_window.as_weak();
-    let studio_images: Rc<RefCell<HashMap<String, CursorImage>>> =
-        Rc::new(RefCell::new(HashMap::new()));
-    let studio_role: Rc<RefCell<String>> = Rc::new(RefCell::new("left_ptr".into()));
     let library_cache: Arc<Mutex<Vec<CursorTheme>>> = Arc::new(Mutex::new(Vec::new()));
 
     let settings = AppSettings::load();
     apply_settings_to_window(&main_window, &settings);
     main_window.set_app_version(SharedString::from(env!("CARGO_PKG_VERSION")));
     apply_saved_session(&main_window);
-    refresh_studio_roles(&main_window, &studio_images.borrow());
+    studio_page::install(&main_window, &library_cache);
     rescan_library(&main_window, &library_cache, None, false);
     refresh_device_info_state(&main_window);
     start_auto_update(&main_window);
@@ -113,21 +109,6 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
             for path in paths {
                 handle_import(&w, &path, &library_cache);
             }
-        });
-    }
-
-    {
-        let wh = window_handle.clone();
-        let studio_images = studio_images.clone();
-        let studio_role = studio_role.clone();
-        main_window.on_studio_file_dropped(move |data| {
-            let Some(w) = wh.upgrade() else { return };
-            let paths = paths_from_transfer(&data);
-            let Some(path) = paths.into_iter().next() else {
-                set_status(&w, true, "Drop a PNG or JPEG file onto the canvas.".into());
-                return;
-            };
-            assign_studio_image(&w, &studio_images, &studio_role, &path);
         });
     }
 
@@ -354,103 +335,6 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 });
             });
-        });
-    }
-
-    {
-        let wh = window_handle.clone();
-        let studio_images = studio_images.clone();
-        let studio_role = studio_role.clone();
-        main_window.on_studio_pick_image(move || {
-            let Some(w) = wh.upgrade() else { return };
-            let file = rfd::FileDialog::new()
-                .set_title("Choose a PNG or JPEG cursor frame")
-                .add_filter("Images", IMAGE_EXTENSIONS.as_slice())
-                .pick_file();
-            if let Some(path) = file {
-                assign_studio_image(&w, &studio_images, &studio_role, &path);
-            }
-        });
-    }
-
-    {
-        let wh = window_handle.clone();
-        let studio_images = studio_images.clone();
-        let studio_role = studio_role.clone();
-        main_window.on_studio_select_role(move |role_id| {
-            let role = role_id.as_str().to_string();
-            *studio_role.borrow_mut() = role.clone();
-            if let Some(w) = wh.upgrade() {
-                w.set_studio_selected_role(SharedString::from(&role));
-                show_selected_preview(&w, &studio_images.borrow(), &role);
-            }
-        });
-    }
-
-    {
-        let wh = window_handle.clone();
-        main_window.on_studio_set_hotspot(move |nx, ny| {
-            let Some(w) = wh.upgrade() else { return };
-            let wpx = w.get_studio_img_w().max(1);
-            let hpx = w.get_studio_img_h().max(1);
-            let x = (nx.clamp(0.0, 1.0) * wpx as f32).round() as i32;
-            let y = (ny.clamp(0.0, 1.0) * hpx as f32).round() as i32;
-            w.set_studio_hotspot_x(x.clamp(0, wpx - 1));
-            w.set_studio_hotspot_y(y.clamp(0, hpx - 1));
-        });
-    }
-
-    {
-        let wh = window_handle.clone();
-        let studio_images = studio_images.clone();
-        let studio_role = studio_role.clone();
-        main_window.on_studio_use_for_all(move || {
-            let Some(w) = wh.upgrade() else { return };
-            let current = studio_role.borrow().clone();
-            let mut images = studio_images.borrow_mut();
-            let Some(src) = images.get(&current).cloned() else {
-                set_status(&w, true, "Assign a PNG to this role first.".into());
-                return;
-            };
-            for role in STUDIO_ROLES {
-                images.insert(role.id.to_string(), src.clone());
-            }
-            drop(images);
-            refresh_studio_roles(&w, &studio_images.borrow());
-            set_status(&w, false, "Same frame applied to every role.".into());
-        });
-    }
-
-    {
-        let wh = window_handle.clone();
-        let studio_images = studio_images.clone();
-        let library_cache = library_cache.clone();
-        main_window.on_studio_export(move || {
-            let Some(w) = wh.upgrade() else { return };
-            let name = w.get_studio_name().as_str().to_string();
-            let comment = w.get_studio_comment().as_str().to_string();
-            let size = w.get_studio_size() as u32;
-            let xhot = w.get_studio_hotspot_x() as u32;
-            let yhot = w.get_studio_hotspot_y() as u32;
-            let images = studio_images.borrow();
-            match export_theme(&name, &comment, size, xhot, yhot, &images) {
-                Ok(folder) => {
-                    drop(images);
-                    set_status(&w, false, format!("Installed {}", folder));
-                    let settings = read_settings(&w);
-                    if settings.auto_apply_on_import {
-                        apply_theme_async(
-                            &w,
-                            folder,
-                            settings.preferred_size,
-                            Some(&library_cache),
-                        );
-                    } else {
-                        rescan_library(&w, &library_cache, None, false);
-                    }
-                }
-                Err(e) => set_status(&w, true, e),
-            }
         });
     }
 
@@ -926,71 +810,6 @@ fn handle_import(window: &MainWindow, path: &Path, library_cache: &Arc<Mutex<Vec
     });
 }
 
-fn assign_studio_image(
-    window: &MainWindow,
-    studio_images: &Rc<RefCell<HashMap<String, CursorImage>>>,
-    studio_role: &Rc<RefCell<String>>,
-    path: &Path,
-) {
-    match load_png_as_cursor(path) {
-        Ok(img) => {
-            let role = studio_role.borrow().clone();
-            let w = img.width as i32;
-            let h = img.height as i32;
-            studio_images.borrow_mut().insert(role.clone(), img.clone());
-            window.set_studio_img_w(w);
-            window.set_studio_img_h(h);
-            if window.get_studio_hotspot_x() >= w {
-                window.set_studio_hotspot_x(0);
-            }
-            if window.get_studio_hotspot_y() >= h {
-                window.set_studio_hotspot_y(0);
-            }
-            let (preview, has) = to_slint_image(Some(&img));
-            window.set_studio_preview(preview);
-            window.set_studio_has_preview(has);
-            refresh_studio_roles(window, &studio_images.borrow());
-            set_status(
-                window,
-                false,
-                format!("Loaded {} for {}", path.display(), role),
-            );
-        }
-        Err(e) => set_status(window, true, e),
-    }
-}
-
-fn show_selected_preview(window: &MainWindow, images: &HashMap<String, CursorImage>, role: &str) {
-    if let Some(img) = images.get(role) {
-        window.set_studio_img_w(img.width as i32);
-        window.set_studio_img_h(img.height as i32);
-        if window.get_studio_hotspot_x() < 0 || window.get_studio_hotspot_x() >= img.width as i32 {
-            window.set_studio_hotspot_x(0);
-        }
-        if window.get_studio_hotspot_y() < 0 || window.get_studio_hotspot_y() >= img.height as i32 {
-            window.set_studio_hotspot_y(0);
-        }
-        let (preview, has) = to_slint_image(Some(img));
-        window.set_studio_preview(preview);
-        window.set_studio_has_preview(has);
-    } else {
-        window.set_studio_has_preview(false);
-        window.set_studio_preview(Image::default());
-    }
-}
-
-fn refresh_studio_roles(window: &MainWindow, images: &HashMap<String, CursorImage>) {
-    let items: Vec<StudioRole> = STUDIO_ROLES
-        .iter()
-        .map(|role| StudioRole {
-            id: SharedString::from(role.id),
-            label: SharedString::from(role.label),
-            assigned: images.contains_key(role.id),
-        })
-        .collect();
-    window.set_studio_roles(ModelRc::from(Rc::new(VecModel::from(items))));
-}
-
 fn mark_theme_applied(window: &MainWindow, name: &str, size: u32, warnings: &[String]) {
     window.set_active_theme_name(SharedString::from(name));
     if warnings.is_empty() {
@@ -1136,11 +955,10 @@ fn rescan_library(
                     window.set_active_size(active.size as i32);
                 }
             }
-            paint_library(
-                &window,
-                &cache.lock().unwrap_or_else(|e| e.into_inner()),
-                highlight.as_deref(),
-            );
+            let themes = cache.lock().unwrap_or_else(|e| e.into_inner());
+            paint_library(&window, &themes, highlight.as_deref());
+            studio_page::paint_theme_choices(&window, &themes);
+            drop(themes);
             if announce {
                 set_status(&window, false, "Library refreshed".into());
             }
