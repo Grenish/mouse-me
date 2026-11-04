@@ -740,14 +740,43 @@ pub fn save_draft(project: &StudioProject, dir: &Path) -> Result<(), String> {
     let raw = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
     fs::write(staging.path().join("project.json"), raw).map_err(|e| e.to_string())?;
 
+    // The old draft is moved aside, not deleted, until the new one is in
+    // place. If that is interrupted, `load_draft` falls back to it.
     let staged = staging.keep();
+    let retired = retired_draft_dir(dir);
     if dir.exists() {
-        fs::remove_dir_all(dir).map_err(|e| e.to_string())?;
+        if retired.exists() {
+            fs::remove_dir_all(&retired).map_err(|e| e.to_string())?;
+        }
+        if let Err(e) = fs::rename(dir, &retired) {
+            let _ = fs::remove_dir_all(&staged);
+            return Err(e.to_string());
+        }
     }
-    fs::rename(&staged, dir).map_err(|e| e.to_string())
+    if let Err(e) = fs::rename(&staged, dir) {
+        if !dir.exists() && retired.exists() {
+            let _ = fs::rename(&retired, dir);
+        }
+        let _ = fs::remove_dir_all(&staged);
+        return Err(e.to_string());
+    }
+    let _ = fs::remove_dir_all(&retired);
+    Ok(())
 }
 
+fn retired_draft_dir(dir: &Path) -> PathBuf {
+    let mut name = dir.file_name().unwrap_or_default().to_os_string();
+    name.push(".old");
+    dir.with_file_name(name)
+}
+
+/// Loads the draft, or the copy `save_draft` set aside if a save was cut off
+/// before the new draft was in place.
 pub fn load_draft(dir: &Path) -> Option<StudioProject> {
+    read_draft(dir).or_else(|| read_draft(&retired_draft_dir(dir)))
+}
+
+fn read_draft(dir: &Path) -> Option<StudioProject> {
     let raw = fs::read_to_string(dir.join("project.json")).ok()?;
     let manifest: DraftManifest = serde_json::from_str(&raw).ok()?;
     let mut project = StudioProject {
@@ -773,4 +802,51 @@ pub fn load_draft(dir: &Path) -> Option<StudioProject> {
         project.set_delay(&role.id, role.delay_ms);
     }
     Some(project)
+}
+
+/// Orders frame files by name, comparing runs of digits as numbers, so
+/// `frame2.png` comes before `frame10.png` whether or not they are padded.
+pub fn sort_frame_paths(paths: &mut [PathBuf]) {
+    paths.sort_by(|a, b| {
+        let name = |path: &PathBuf| {
+            path.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_lowercase()
+        };
+        natural_cmp(&name(a), &name(b)).then_with(|| a.cmp(b))
+    });
+}
+
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let (mut a, mut b) = (a.chars().peekable(), b.chars().peekable());
+    loop {
+        match (a.peek().copied(), b.peek().copied()) {
+            (None, None) => return std::cmp::Ordering::Equal,
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
+                let take = |chars: &mut std::iter::Peekable<std::str::Chars>| {
+                    let mut digits = String::new();
+                    while let Some(c) = chars.next_if(|c| c.is_ascii_digit()) {
+                        digits.push(c);
+                    }
+                    digits
+                };
+                let (x, y) = (take(&mut a), take(&mut b));
+                let (xt, yt) = (x.trim_start_matches('0'), y.trim_start_matches('0'));
+                let order = xt.len().cmp(&yt.len()).then_with(|| xt.cmp(yt));
+                if order != std::cmp::Ordering::Equal {
+                    return order;
+                }
+            }
+            (Some(x), Some(y)) => {
+                if x != y {
+                    return x.cmp(&y);
+                }
+                a.next();
+                b.next();
+            }
+        }
+    }
 }

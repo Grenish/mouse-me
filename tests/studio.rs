@@ -2,8 +2,8 @@ mod common;
 
 use mouse_me::core::studio::{
     export_project_into, load_draft, load_png_as_cursor, load_theme_project, sanitize_theme_name,
-    save_draft, scale_cursor, square_pad, suggest_hotspot, Anchor, StudioProject, STUDIO_MARKER,
-    STUDIO_ROLES,
+    save_draft, scale_cursor, sort_frame_paths, square_pad, suggest_hotspot, Anchor, StudioProject,
+    STUDIO_MARKER, STUDIO_ROLES,
 };
 use mouse_me::core::types::CursorImage;
 use mouse_me::core::xcursor::{parse_xcursor_file, parse_xcursor_frames};
@@ -381,4 +381,54 @@ fn draft_round_trips() {
     assert_eq!(wait.frames.len(), 2);
     assert_eq!((wait.xhot, wait.yhot, wait.delay_ms), (5, 6, 200));
     assert_eq!(wait.frames[1].rgba, project.roles["wait"].frames[1].rgba);
+}
+
+#[test]
+fn draft_survives_a_save_cut_off_before_the_swap() {
+    let dir = tempfile::tempdir().unwrap();
+    let draft = dir.path().join("studio-draft");
+    let project = project_with(
+        "left_ptr",
+        vec![common::solid_cursor(16, 16, [1, 2, 3, 255])],
+    );
+    save_draft(&project, &draft).unwrap();
+
+    // A save that set the old draft aside and then stopped.
+    std::fs::rename(&draft, dir.path().join("studio-draft.old")).unwrap();
+
+    let loaded = load_draft(&draft).expect("the set-aside draft should load");
+    assert!(loaded.roles.contains_key("left_ptr"));
+
+    save_draft(&project, &draft).unwrap();
+    assert!(draft.join("project.json").is_file());
+    assert!(!dir.path().join("studio-draft.old").exists());
+}
+
+#[test]
+fn frame_paths_sort_numbers_by_value() {
+    let mut paths: Vec<std::path::PathBuf> = [
+        "/b/frame10.png",
+        "/a/frame2.png",
+        "/c/frame1.png",
+        "/a/Frame11.png",
+        "/a/frame02b.png",
+    ]
+    .iter()
+    .map(Into::into)
+    .collect();
+    sort_frame_paths(&mut paths);
+    let names: Vec<_> = paths
+        .iter()
+        .map(|p| p.file_name().unwrap().to_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "frame1.png",
+            "frame2.png",
+            "frame02b.png",
+            "frame10.png",
+            "Frame11.png"
+        ]
+    );
 }

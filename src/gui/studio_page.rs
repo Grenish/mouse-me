@@ -8,7 +8,7 @@ use slint::{ComponentHandle, Image, ModelRc, SharedString, Timer, VecModel};
 
 use mouse_me::core::studio::{
     draft_dir, export_project, load_draft, load_png_as_cursor, load_theme_project, role_def,
-    sanitize_theme_name, save_draft, StudioProject, SIZE_CHOICES, STUDIO_ROLES,
+    sanitize_theme_name, save_draft, sort_frame_paths, StudioProject, SIZE_CHOICES, STUDIO_ROLES,
 };
 use mouse_me::core::types::{CursorImage, CursorTheme, CursorType};
 
@@ -56,6 +56,8 @@ pub(super) fn install(window: &MainWindow, library_cache: &Arc<Mutex<Vec<CursorT
             let mut st = studio.borrow_mut();
             st.role = role.to_string();
             st.frame = 0;
+            // A Clear armed on one role must not fire on another.
+            st.pending = None;
             paint(&w, &st);
         });
     }
@@ -126,7 +128,23 @@ pub(super) fn install(window: &MainWindow, library_cache: &Arc<Mutex<Vec<CursorT
         let (wh, studio) = (wh.clone(), studio.clone());
         window.on_studio_clear_role(move || {
             let Some(w) = wh.upgrade() else { return };
-            let label = role_label(&studio.borrow().role);
+            let (label, has_art) = {
+                let st = studio.borrow();
+                (
+                    role_label(&st.role),
+                    st.project.roles.contains_key(&st.role),
+                )
+            };
+            if has_art
+                && !confirm(
+                    &w,
+                    &studio,
+                    "clear",
+                    &format!("Click Clear again to remove every frame from {label}."),
+                )
+            {
+                return;
+            }
             edit(&w, &studio, |st| {
                 let role = st.role.clone();
                 st.project.roles.remove(&role);
@@ -353,8 +371,8 @@ pub(super) fn paint_theme_choices(window: &MainWindow, themes: &[CursorTheme]) {
 }
 
 fn add_paths(window: &MainWindow, studio: &Shared, mut paths: Vec<PathBuf>, replace: bool) {
-    // Frames exported as frame-01.png, frame-02.png… arrive in order.
-    paths.sort();
+    // frame2.png comes before frame10.png, padded or not.
+    sort_frame_paths(&mut paths);
     let mut images: Vec<CursorImage> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
     for path in &paths {
